@@ -37,6 +37,7 @@ fun SummerApp(
     val networkState by viewModel.networkState.collectAsStateWithLifecycle()
     val latestAudit by viewModel.latestAuditLog.collectAsStateWithLifecycle()
     val speech by viewModel.recentAssistantSpeech.collectAsStateWithLifecycle()
+    val currentInteraction by viewModel.currentInteraction.collectAsStateWithLifecycle()
 
     Crossfade(targetState = currentScreen, label = "screen_crossfade") { screen ->
         when (screen) {
@@ -47,6 +48,7 @@ fun SummerApp(
                     personality = viewModel.getPersonality(),
                     latestAudit = latestAudit,
                     recentAssistantSpeech = speech,
+                    currentInteraction = currentInteraction,
                     onStateSelected = { viewModel.selectStateDemo(it) },
                     onSubmitQuery = { viewModel.submitQuery(it) },
                     onMicTrigger = { viewModel.triggerVoiceInteraction() },

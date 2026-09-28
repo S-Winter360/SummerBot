@@ -6,17 +6,18 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
-import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
@@ -50,6 +51,8 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.actions.ActionAuditEntry
+import com.example.core.interaction.InteractionState
+import com.example.core.interaction.SummerInteraction
 import com.example.core.personality.SummerPersonality
 import com.example.core.state.SummerState
 import com.example.network.NetworkState
@@ -75,6 +78,7 @@ fun MainSummerScreen(
     personality: SummerPersonality,
     latestAudit: ActionAuditEntry?,
     recentAssistantSpeech: String?,
+    currentInteraction: SummerInteraction? = null,
     onStateSelected: (SummerState) -> Unit,
     onSubmitQuery: (String) -> Unit,
     onMicTrigger: () -> Unit,
@@ -90,6 +94,16 @@ fun MainSummerScreen(
             onDismiss = { showPersonalityDialog = false }
         )
     }
+
+    val demoPrompts = listOf(
+        "Hello Summer",
+        "What is your name?",
+        "What can you do?",
+        "What time is it?",
+        "test network",
+        "test mic",
+        "remember I enjoy quiet evenings"
+    )
 
     Box(
         modifier = modifier
@@ -179,13 +193,13 @@ fun MainSummerScreen(
             // 1. Central Visual AI Core / Orb
             SummerVisualCore(
                 state = state,
-                size = 230.dp,
+                size = 220.dp,
                 modifier = Modifier
                     .clip(CircleShape)
                     .clickable { showPersonalityDialog = true }
             )
 
-            Spacer(modifier = Modifier.height(20.dp))
+            Spacer(modifier = Modifier.height(16.dp))
 
             // 2. Assistant Name "SUMMER"
             Column(
@@ -208,10 +222,28 @@ fun MainSummerScreen(
                 )
             }
 
-            Spacer(modifier = Modifier.height(12.dp))
+            Spacer(modifier = Modifier.height(10.dp))
 
             // 3. Current State Indicator
             StateIndicatorBadge(state = state)
+
+            // Interaction Lifecycle Pill (if active)
+            if (currentInteraction != null && currentInteraction.processingState != InteractionState.COMPLETED) {
+                Box(
+                    modifier = Modifier
+                        .padding(top = 6.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(CoreCharcoalElevated)
+                        .border(1.dp, CyanLuminous.copy(alpha = 0.5f), RoundedCornerShape(12.dp))
+                        .padding(horizontal = 10.dp, vertical = 4.dp)
+                ) {
+                    Text(
+                        text = "STAGE: ${currentInteraction.processingState.name}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = CyanLuminous
+                    )
+                }
+            }
 
             // Dynamic Context / Speech Bubble
             AnimatedVisibility(
@@ -241,7 +273,38 @@ fun MainSummerScreen(
                 }
             }
 
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(12.dp))
+
+            // Quick demo intent chips
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                demoPrompts.forEach { prompt ->
+                    Box(
+                        modifier = Modifier
+                            .defaultMinSize(minHeight = 36.dp)
+                            .clip(RoundedCornerShape(14.dp))
+                            .background(CoreCharcoalElevated)
+                            .border(1.dp, CoreCharcoalBorder, RoundedCornerShape(14.dp))
+                            .clickable {
+                                onSubmitQuery(prompt)
+                            }
+                            .padding(horizontal = 12.dp, vertical = 6.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = prompt,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = SlateLight
+                        )
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
 
             // State Transition Demonstration Switcher
             Column(
@@ -261,7 +324,7 @@ fun MainSummerScreen(
                 )
             }
 
-            Spacer(modifier = Modifier.height(12.dp))
+            Spacer(modifier = Modifier.height(8.dp))
 
             // Capability / Security Audit Ticker
             CapabilityAuditTicker(
@@ -269,9 +332,9 @@ fun MainSummerScreen(
                 modifier = Modifier.fillMaxWidth()
             )
 
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(12.dp))
 
-            // 4 & 5. Conversation & Microphone Entry Points
+            // Conversation & Microphone Entry Points
             ConversationInputBar(
                 inputText = inputText,
                 onInputChange = { inputText = it },

@@ -5,6 +5,7 @@ import android.content.Context
 import androidx.lifecycle.ViewModelProvider
 import androidx.test.core.app.ApplicationProvider
 import com.example.ui.MainViewModel
+import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Test
@@ -30,5 +31,17 @@ class ExampleRobolectricTest {
     val viewModel = factory.create(MainViewModel::class.java)
     assertNotNull(viewModel)
     assertEquals("Summer", viewModel.getPersonality().shortName)
+  }
+
+  @Test
+  fun `MainViewModel delegates query to SummerOrchestrator`() = runBlocking {
+    val app = ApplicationProvider.getApplicationContext<Application>()
+    val factory = ViewModelProvider.AndroidViewModelFactory.getInstance(app)
+    val viewModel = factory.create(MainViewModel::class.java)
+
+    // Direct orchestrator execution via ViewModel
+    val interaction = viewModel.orchestrator.handleUserInput("Hello Summer")
+    assertEquals("Hello. I'm Summer. How can I assist you?", interaction.response?.text)
+    assertNotNull(viewModel.recentResponse.value)
   }
 }
