@@ -1,0 +1,19 @@
+<resources>
+    <string name="app_name">Summer Winter</string>
+    <string name="assistant_short_name">Summer</string>
+    <string name="assistant_full_name">Summer Winter</string>
+    <string name="assistant_role">Personal AI Companion</string>
+    <string name="state_idle">Idle</string>
+    <string name="state_listening">Listening</string>
+    <string name="state_thinking">Thinking</string>
+    <string name="state_speaking">Speaking</string>
+    <string name="state_executing">Executing</string>
+    <string name="state_observing">Observing</string>
+    <string name="state_learning">Learning</string>
+    <string name="state_error">Error</string>
+    <string name="settings_title">System Settings</string>
+    <string name="conversation_placeholder">Type a command or query for Summer…</string>
+    <string name="mic_action_description">Voice interaction trigger</string>
+    <string name="settings_action_description">Settings</string>
+    <string name="voice_input_prompt">Voice input interface</string>
+</resources>
