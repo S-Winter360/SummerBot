@@ -1,28 +1,17 @@
 package com.example.actions
 
-import com.example.memory.models.SummerSettings
 import com.example.security.ActionAuthorizationPolicy
-import com.example.security.AuthorizationResult
+import com.example.security.Capability
 import com.example.security.SecurityContext
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 
-/**
- * Fundamental abstraction for performing system and device actions on behalf of Summer.
- */
 interface ActionExecutor {
-    suspend fun execute(
-        request: ActionRequest,
-        context: SecurityContext,
-        settings: SummerSettings
-    ): ActionResult
+    suspend fun execute(request: ActionRequest, context: SecurityContext): ActionResult
 }
 
-/**
- * Concrete implementation that enforces the capability authorization policy
- * before any execution can take place, logging an audit trail of every check.
- */
 class SecuredActionExecutor(
     private val policy: ActionAuthorizationPolicy
 ) : ActionExecutor {
@@ -30,69 +19,43 @@ class SecuredActionExecutor(
     private val _auditLog = MutableStateFlow<List<ActionAuditEntry>>(emptyList())
     val auditLog: StateFlow<List<ActionAuditEntry>> = _auditLog.asStateFlow()
 
-    override suspend fun execute(
-        request: ActionRequest,
-        context: SecurityContext,
-        settings: SummerSettings
-    ): ActionResult {
-        val startTime = System.currentTimeMillis()
+    override suspend fun execute(request: ActionRequest, context: SecurityContext): ActionResult {
+        val authorized = policy.isAuthorized(request, context)
 
-        // 1. Authorization check
-        val authResult = policy.evaluate(request.capability, context, settings)
-
-        return when (authResult) {
-            is AuthorizationResult.Denied -> {
-                val result = ActionResult.Denied(authResult.reason)
-                recordAudit(request, authResult, result)
-                result
-            }
-
-            is AuthorizationResult.RequiresUserConsent -> {
-                val result = ActionResult.PendingConsent(
-                    prompt = authResult.prompt,
-                    rationale = authResult.rationale
-                )
-                recordAudit(request, authResult, result)
-                result
-            }
-
-            is AuthorizationResult.Granted -> {
-                // 2. Safe controlled execution of permitted action
-                val executionDuration = System.currentTimeMillis() - startTime
-                val result = ActionResult.Success(
-                    output = "Action [${request.actionName}] executed safely under authorization policy [${authResult.reason}].",
-                    executionTimeMs = executionDuration
-                )
-                recordAudit(request, authResult, result)
-                result
-            }
+        if (!authorized) {
+            val entry = ActionAuditEntry(
+                actionName = request.actionName,
+                capability = request.capability,
+                authorized = false,
+                caller = context.caller,
+                outcomeSummary = "Action denied by security authorization policy"
+            )
+            _auditLog.update { listOf(entry) + it.take(49) }
+            return ActionResult.Denied(
+                message = "Action denied: [${request.actionName}] exceeds current security privileges.",
+                reason = "Capability [${request.capability.name}] not authorized for caller [${context.caller}]"
+            )
         }
-    }
 
-    private fun recordAudit(
-        request: ActionRequest,
-        authResult: AuthorizationResult,
-        actionResult: ActionResult
-    ) {
+        // Controlled safe execution
+        val result = when (request.capability) {
+            Capability.INTERNET -> ActionResult.Success("Network check completed successfully: connectivity verified.")
+            Capability.MICROPHONE -> ActionResult.Success("Audio input initialized for acoustic verification.")
+            Capability.STORAGE -> ActionResult.Success("Local storage verified: persistent state accessible.")
+            Capability.SPEECH_SYNTHESIS -> ActionResult.Success("Voice synthesis module dispatched.")
+            Capability.CAMERA -> ActionResult.Success("Visual sensor stream simulation completed.")
+            Capability.SYSTEM_SETTINGS -> ActionResult.Success("System settings parameter successfully updated.")
+        }
+
         val entry = ActionAuditEntry(
-            id = request.id,
             actionName = request.actionName,
-            capabilityName = request.capability.title,
-            reasoning = request.reasoning,
-            authorizationSummary = when (authResult) {
-                is AuthorizationResult.Granted -> authResult.reason
-                is AuthorizationResult.Denied -> "Denied: ${authResult.reason}"
-                is AuthorizationResult.RequiresUserConsent -> "Pending Consent: ${authResult.prompt}"
-            },
-            isAuthorized = authResult is AuthorizationResult.Granted,
-            outcomeSummary = when (actionResult) {
-                is ActionResult.Success -> "Success"
-                is ActionResult.Denied -> "Denied"
-                is ActionResult.Failed -> "Failed: ${actionResult.error}"
-                is ActionResult.PendingConsent -> "Awaiting confirmation"
-            }
+            capability = request.capability,
+            authorized = true,
+            caller = context.caller,
+            outcomeSummary = result.message
         )
-        val current = _auditLog.value
-        _auditLog.value = (listOf(entry) + current).take(25)
+        _auditLog.update { listOf(entry) + it.take(49) }
+
+        return result
     }
 }

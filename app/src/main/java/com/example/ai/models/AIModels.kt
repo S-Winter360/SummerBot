@@ -5,9 +5,6 @@ import com.example.core.intent.SummerIntent
 import com.example.core.response.SummerResponse
 import com.example.memory.models.MemoryRecord
 
-/**
- * Diagnostic and capability metadata for an AI inference engine.
- */
 data class AIModelInfo(
     val name: String,
     val version: String,
@@ -15,18 +12,12 @@ data class AIModelInfo(
     val description: String
 )
 
-/**
- * Contextual request sent to Summer's reasoning core.
- */
 data class AIRequest(
     val query: String,
     val conversationId: String = "primary_session",
     val timestamp: Long = System.currentTimeMillis()
 )
 
-/**
- * Categorization of recognized user intent (legacy / compatibility).
- */
 sealed interface RecognizedIntent {
     data class SystemStatus(val query: String) : RecognizedIntent
     data class PersonalityQuery(val query: String) : RecognizedIntent
@@ -34,9 +25,6 @@ sealed interface RecognizedIntent {
     data class GeneralConversation(val text: String) : RecognizedIntent
 }
 
-/**
- * Structured response produced by the AI Engine (legacy / compatibility).
- */
 data class AIResponse(
     val text: String,
     val modelUsed: String,
@@ -45,9 +33,6 @@ data class AIResponse(
     val timestamp: Long = System.currentTimeMillis()
 )
 
-/**
- * Modern structured result produced by [com.example.ai.AIEngine] for [com.example.core.orchestrator.SummerOrchestrator].
- */
 data class AIResult(
     val intent: SummerIntent,
     val response: SummerResponse,

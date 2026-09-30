@@ -6,6 +6,16 @@ import androidx.lifecycle.viewModelScope
 import com.example.actions.ActionAuditEntry
 import com.example.actions.SecuredActionExecutor
 import com.example.ai.OfflineLocalAIEngine
+import com.example.ai.capability.AIDiagnostics
+import com.example.ai.capability.AIModelMetadata
+import com.example.ai.capability.AIModelRegistry
+import com.example.ai.capability.AIModelRouter
+import com.example.ai.capability.AIProviderType
+import com.example.ai.capability.AndroidDeviceAICapabilityDetector
+import com.example.ai.capability.AndroidOnDeviceGenAIStatusProvider
+import com.example.ai.capability.DeviceAICapabilityDetector
+import com.example.ai.capability.OnDeviceGenAIProvider
+import com.example.ai.capability.OnDeviceGenAIStatusProvider
 import com.example.core.decision.DefaultSummerDecisionEngine
 import com.example.core.event.SummerEventBus
 import com.example.core.interaction.SummerInteraction
@@ -45,7 +55,8 @@ class MainViewModel @JvmOverloads constructor(
     application: Application,
     val stateManager: SummerStateManager = SummerStateManager(),
     private val personality: SummerPersonality = SummerPersonality.DEFAULT,
-    orchestratorInstance: SummerOrchestrator? = null
+    orchestratorInstance: SummerOrchestrator? = null,
+    genAIStatusProvider: OnDeviceGenAIStatusProvider = AndroidOnDeviceGenAIStatusProvider()
 ) : AndroidViewModel(application) {
 
     private val database = SummerDatabase.getInstance(application)
@@ -58,11 +69,38 @@ class MainViewModel @JvmOverloads constructor(
     val actionExecutor = SecuredActionExecutor(authorizationPolicy)
     val networkProvider: NetworkInformationProvider = AndroidNetworkInformationProvider(application)
 
+    // Phase 0C-R1: Local AI Capability, Registry & Routing Layer backed by official ML Kit GenAI Prompt API
+    val aiModelRegistry = AIModelRegistry()
+    val onDeviceGenAIProvider = OnDeviceGenAIProvider(statusProvider = genAIStatusProvider)
+    val fallbackAIEngine = OfflineLocalAIEngine(personality)
+    val deviceCapabilityDetector: DeviceAICapabilityDetector = AndroidDeviceAICapabilityDetector(
+        context = application,
+        networkProvider = networkProvider,
+        genAIStatusProvider = genAIStatusProvider
+    )
+
+    val aiModelRouter = AIModelRouter(
+        registry = aiModelRegistry,
+        fallbackEngine = fallbackAIEngine,
+        detector = deviceCapabilityDetector,
+        networkProvider = networkProvider,
+        routerScope = viewModelScope
+    )
+
+    init {
+        // Register the on-device GenAI provider in registry
+        aiModelRegistry.register(
+            providerType = AIProviderType.ON_DEVICE_GENAI,
+            engine = onDeviceGenAIProvider,
+            metadata = onDeviceGenAIProvider.metadata
+        )
+    }
+
     val orchestrator: SummerOrchestrator = orchestratorInstance ?: SummerOrchestrator(
         stateManager = stateManager,
         sessionManager = SummerSessionManager(),
         eventBus = SummerEventBus(),
-        aiEngine = OfflineLocalAIEngine(personality),
+        aiEngine = aiModelRouter,
         decisionEngine = DefaultSummerDecisionEngine(),
         authorizationPolicy = authorizationPolicy,
         actionExecutor = actionExecutor,
@@ -109,6 +147,8 @@ class MainViewModel @JvmOverloads constructor(
             initialValue = "Hello. I am ${personality.shortName}. All cognitive systems are active in local offline mode."
         )
 
+    val aiDiagnostics: StateFlow<AIDiagnostics> = aiModelRouter.diagnostics
+
     private val _currentScreen = MutableStateFlow(CurrentScreen.MAIN)
     val currentScreen: StateFlow<CurrentScreen> = _currentScreen.asStateFlow()
 
@@ -141,6 +181,15 @@ class MainViewModel @JvmOverloads constructor(
     fun triggerVoiceInteraction() {
         viewModelScope.launch {
             orchestrator.handleUserInput(input = "test mic", source = "ui.mic_trigger")
+        }
+    }
+
+    /**
+     * Re-runs device AI capability detection using official Prompt API and updates diagnostics.
+     */
+    fun refreshAICapabilities() {
+        viewModelScope.launch {
+            aiModelRouter.refreshCapabilities()
         }
     }
 

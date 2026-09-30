@@ -4,25 +4,22 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
 
-private val SummerDarkColorScheme = darkColorScheme(
+private val DarkColorScheme = darkColorScheme(
     primary = CyanLuminous,
     onPrimary = CoreBlack,
-    primaryContainer = CyanMuted,
+    primaryContainer = CoreCharcoalElevated,
     onPrimaryContainer = CyanBright,
     secondary = SlateLight,
     onSecondary = CoreBlack,
-    secondaryContainer = CoreCharcoalElevated,
-    onSecondaryContainer = SlateBright,
-    tertiary = CyanGlow,
-    onTertiary = CoreBlack,
     background = CoreBlack,
-    onBackground = CoreWhite,
-    surface = CoreDarkCharcoal,
-    onSurface = CoreWhite,
-    surfaceVariant = CoreCharcoalSurface,
+    onBackground = SlateBright,
+    surface = CoreCharcoalSurface,
+    onSurface = SlateBright,
+    surfaceVariant = CoreCharcoalElevated,
     onSurfaceVariant = SlateLight,
     outline = CoreCharcoalBorder,
-    outlineVariant = CoreCharcoalElevated
+    error = ErrorRed,
+    onError = SlateBright
 )
 
 @Composable
@@ -30,7 +27,7 @@ fun SummerWinterTheme(
     content: @Composable () -> Unit
 ) {
     MaterialTheme(
-        colorScheme = SummerDarkColorScheme,
+        colorScheme = DarkColorScheme,
         typography = Typography,
         content = content
     )

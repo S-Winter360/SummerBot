@@ -38,6 +38,7 @@ fun SummerApp(
     val latestAudit by viewModel.latestAuditLog.collectAsStateWithLifecycle()
     val speech by viewModel.recentAssistantSpeech.collectAsStateWithLifecycle()
     val currentInteraction by viewModel.currentInteraction.collectAsStateWithLifecycle()
+    val aiDiagnostics by viewModel.aiDiagnostics.collectAsStateWithLifecycle()
 
     Crossfade(targetState = currentScreen, label = "screen_crossfade") { screen ->
         when (screen) {
@@ -59,7 +60,9 @@ fun SummerApp(
             CurrentScreen.SETTINGS -> {
                 SettingsScreen(
                     settings = settings,
+                    aiDiagnostics = aiDiagnostics,
                     onUpdateSettings = { viewModel.updateSettings(it) },
+                    onRefreshAIDiagnostics = { viewModel.refreshAICapabilities() },
                     onNavigateBack = { viewModel.navigateTo(CurrentScreen.MAIN) }
                 )
             }

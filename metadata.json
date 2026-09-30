@@ -1,6 +1,6 @@
 {
-  "name": "Summer Winter",
-  "description": "Offline-first personal AI companion foundation with state engine, visual core, and capability security model.",
+  "name": "Summer",
+  "description": "On-device AI companion and assistant architecture",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

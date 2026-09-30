@@ -1,73 +1,46 @@
 package com.example.core.state
 
-/**
- * Represents the comprehensive state model for Summer.
- * Designed to support both current demonstration states and future
- * multimodal / autonomous processing states without architectural rewriting.
- */
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+
 sealed interface SummerState {
-    val displayName: String
     val description: String
 
-    /** Default standby state, awaiting interaction or wake word. */
     data object Idle : SummerState {
-        override val displayName: String = "IDLE"
-        override val description: String = "Standing by. Offline cognitive system ready."
+        override val description: String = "Observant, quiescent, and ready."
     }
 
-    /** Actively capturing user speech or audio input. */
-    data class Listening(
-        val inputSource: String = "Voice input"
-    ) : SummerState {
-        override val displayName: String = "LISTENING"
-        override val description: String = "Receiving audio stream via $inputSource."
+    data object Listening : SummerState {
+        override val description: String = "Awaiting speech or sensor input."
     }
 
-    /** Processing intent, querying memory, or performing reasoning. */
-    data class Thinking(
-        val stage: String = "Analyzing contextual intent"
-    ) : SummerState {
-        override val displayName: String = "THINKING"
-        override val description: String = stage
+    data class Thinking(val intent: String? = null) : SummerState {
+        override val description: String = "Synthesizing intent and evaluating reasoning pipelines."
     }
 
-    /** Synthesizing speech or presenting verbal/audio output. */
-    data class Speaking(
-        val utterance: String? = null
-    ) : SummerState {
-        override val displayName: String = "SPEAKING"
-        override val description: String = utterance ?: "Responding to user."
+    data class Speaking(val textPreview: String) : SummerState {
+        override val description: String = "Rendering conversational response."
     }
 
-    /** Executing an authorized device action or planned sequence. */
-    data class Executing(
-        val actionName: String = "System Task"
-    ) : SummerState {
-        override val displayName: String = "EXECUTING"
-        override val description: String = "Running authorized task: $actionName."
+    data class Executing(val actionName: String) : SummerState {
+        override val description: String = "Authorizing and performing system action: $actionName."
     }
 
-    /** Actively observing visual or ambient contextual sensors. */
-    data class Observing(
-        val sensorType: String = "Ambient context"
-    ) : SummerState {
-        override val displayName: String = "OBSERVING"
-        override val description: String = "Analyzing $sensorType."
+    data class Learning(val topic: String) : SummerState {
+        override val description: String = "Consolidating observation into local memory."
     }
 
-    /** Consolidating local episodic memory or updating knowledge weights. */
-    data class Learning(
-        val domain: String = "Personal preferences"
-    ) : SummerState {
-        override val displayName: String = "LEARNING"
-        override val description: String = "Consolidating $domain into local memory."
+    data class Error(val cause: String) : SummerState {
+        override val description: String = "Safeguard fault intercepted: $cause."
     }
+}
 
-    /** State entered when a fault or unauthorized action occurs. */
-    data class Error(
-        val message: String
-    ) : SummerState {
-        override val displayName: String = "FAULT"
-        override val description: String = message
+class SummerStateManager(initialState: SummerState = SummerState.Idle) {
+    private val _state = MutableStateFlow(initialState)
+    val state: StateFlow<SummerState> = _state.asStateFlow()
+
+    fun transitionTo(newState: SummerState, cause: String = "") {
+        _state.value = newState
     }
 }

@@ -6,21 +6,17 @@ import androidx.room.Room
 import androidx.room.RoomDatabase
 import com.example.memory.dao.MemoryDao
 import com.example.memory.dao.SettingsDao
-import com.example.memory.entity.MemoryEntryEntity
-import com.example.memory.entity.SettingsEntity
+import com.example.memory.models.MemoryRecord
+import com.example.memory.models.SummerSettings
 
 @Database(
-    entities = [
-        SettingsEntity::class,
-        MemoryEntryEntity::class
-    ],
+    entities = [MemoryRecord::class, SummerSettings::class],
     version = 1,
     exportSchema = false
 )
 abstract class SummerDatabase : RoomDatabase() {
-
-    abstract fun settingsDao(): SettingsDao
     abstract fun memoryDao(): MemoryDao
+    abstract fun settingsDao(): SettingsDao
 
     companion object {
         @Volatile
@@ -28,13 +24,11 @@ abstract class SummerDatabase : RoomDatabase() {
 
         fun getInstance(context: Context): SummerDatabase {
             return INSTANCE ?: synchronized(this) {
-                val instance = Room.databaseBuilder(
+                INSTANCE ?: Room.databaseBuilder(
                     context.applicationContext,
                     SummerDatabase::class.java,
-                    "summer_winter.db"
-                ).build()
-                INSTANCE = instance
-                instance
+                    "summer_database.db"
+                ).fallbackToDestructiveMigration().build().also { INSTANCE = it }
             }
         }
     }

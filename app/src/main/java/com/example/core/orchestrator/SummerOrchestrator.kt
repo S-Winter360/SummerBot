@@ -1,6 +1,5 @@
 package com.example.core.orchestrator
 
-import android.util.Log
 import com.example.actions.ActionAuditEntry
 import com.example.actions.ActionExecutor
 import com.example.actions.ActionResult
@@ -49,6 +48,13 @@ internal object SummerLog {
             println("[$tag] $msg")
         }
     }
+    fun w(tag: String, msg: String, tr: Throwable? = null) {
+        try {
+            android.util.Log.w(tag, msg, tr)
+        } catch (_: Throwable) {
+            println("[$tag] $msg: ${tr?.message}")
+        }
+    }
     fun e(tag: String, msg: String, tr: Throwable? = null) {
         try {
             android.util.Log.e(tag, msg, tr)
@@ -58,11 +64,6 @@ internal object SummerLog {
     }
 }
 
-/**
- * Summer's central cognitive orchestrator.
- * Coordinates perception, context formulation, AI parsing, decision generation,
- * capability authorization, action execution, and memory persistence.
- */
 class SummerOrchestrator(
     val stateManager: SummerStateManager,
     val sessionManager: SummerSessionManager,
@@ -79,7 +80,6 @@ class SummerOrchestrator(
         private const val TAG = "SummerOrchestrator"
     }
 
-    // Observable states
     val orchestratorState: StateFlow<SummerState> = stateManager.state
 
     private val _currentInteraction = MutableStateFlow<SummerInteraction?>(null)
@@ -97,91 +97,60 @@ class SummerOrchestrator(
     )
     val latestResponse: StateFlow<SummerResponse?> = _latestResponse.asStateFlow()
 
-    /**
-     * Primary entry point for natural language input from the user.
-     * Enforces the cognitive pipeline:
-     * User Input → Event → Context → AI → Decision → Authorization → Action → Memory → Response
-     */
-    suspend fun handleUserInput(
-        input: String,
-        source: String = "ui.text_input"
-    ): SummerInteraction {
-        val trimmedInput = input.trim()
-        val session = sessionManager.currentSession.value
-        val sessionId = session.id
+    suspend fun handleUserInput(input: String, source: String = "ui.text_input"): SummerInteraction {
+        val session = sessionManager.getActiveSession()
+        val interactionId = java.util.UUID.randomUUID().toString()
 
-        // Guard against empty input
-        if (trimmedInput.isEmpty()) {
-            val emptyInteraction = SummerInteraction(
-                sessionId = sessionId,
-                inputSource = source,
-                userInput = "",
-                processingState = InteractionState.FAILED,
-                errorMessage = "Input was empty"
-            )
-            return emptyInteraction
-        }
-
-        // 1. Initial Interaction created (RECEIVED)
         var interaction = SummerInteraction(
-            sessionId = sessionId,
-            inputSource = source,
-            userInput = trimmedInput,
-            processingState = InteractionState.RECEIVED
+            id = interactionId,
+            sessionId = session.id,
+            userInput = input,
+            state = InteractionState.RECEIVED
         )
         _currentInteraction.value = interaction
         sessionManager.recordInteraction(interaction)
 
         SummerLog.i(TAG, "Interaction received: id=${interaction.id} source=$source")
 
-        // 2. Publish event to event bus
         eventBus.publish(
             SummerEvent.UserTextInput(
-                text = trimmedInput,
-                sessionId = sessionId,
+                text = input,
                 source = source,
+                sessionId = session.id,
                 priority = EventPriority.NORMAL
             )
         )
 
         try {
-            // 3. Transition to Thinking (UNDERSTANDING)
-            interaction = interaction.copy(processingState = InteractionState.UNDERSTANDING)
+            stateManager.transitionTo(SummerState.Thinking(input), cause = "Understanding user input")
+            interaction = interaction.copy(state = InteractionState.UNDERSTANDING)
             _currentInteraction.value = interaction
-            stateManager.transitionTo(SummerState.Thinking("Parsing intent and context..."), cause = "Query processing")
 
-            val currentSettings = memoryRepository.getSettings()
-            val currentNetwork = networkProvider.getCurrentState()
-
-            // 4. Build Context snapshot (REASONING)
-            interaction = interaction.copy(processingState = InteractionState.REASONING)
-            _currentInteraction.value = interaction
+            val settings = memoryRepository.getSettings()
+            val netState = networkProvider.getCurrentState()
 
             val context = SummerContext(
-                sessionId = sessionId,
-                recentConversation = session.interactions.takeLast(5),
-                networkState = currentNetwork,
+                sessionId = session.id,
+                recentInteractions = session.interactions.takeLast(5),
+                networkState = netState,
                 currentState = stateManager.state.value,
-                settings = currentSettings
+                settings = settings
             )
 
-            // 5. AI Engine processes context + interaction
+            interaction = interaction.copy(state = InteractionState.REASONING)
+            _currentInteraction.value = interaction
+
             val aiResult = aiEngine.process(context, interaction)
             SummerLog.i(TAG, "Intent identified: ${aiResult.intent::class.java.simpleName} confidence=${aiResult.confidence}")
 
-            // 6. Decision Engine produces decision
             val decision = decisionEngine.decide(aiResult, context)
             SummerLog.i(TAG, "Decision generated: requiresConfirmation=${decision.requiresConfirmation} actions=${decision.actionRequests.size}")
 
             var finalResponse = decision.response
             val actionResults = mutableListOf<ActionResult>()
 
-            // 7. If action requested, process through security authorization & executor
             if (decision.actionRequests.isNotEmpty()) {
-                interaction = interaction.copy(
-                    processingState = InteractionState.EXECUTING,
-                    actionRequests = decision.actionRequests
-                )
+                interaction = interaction.copy(state = InteractionState.EXECUTING)
                 _currentInteraction.value = interaction
 
                 for (action in decision.actionRequests) {
@@ -194,44 +163,38 @@ class SummerOrchestrator(
 
                     val secContext = SecurityContext(
                         caller = "SUMMER_DECISION_ENGINE",
-                        isUserInitiated = true
+                        isUserInitiated = true,
+                        sessionAuthorized = true
                     )
 
-                    val actionResult = actionExecutor.execute(action, secContext, currentSettings)
+                    val actionResult = actionExecutor.execute(action, secContext)
                     actionResults.add(actionResult)
 
                     eventBus.publish(
                         SummerEvent.ActionResultEvent(
-                            actionId = action.id,
+                            actionName = action.actionName,
                             result = actionResult,
-                            sessionId = sessionId
+                            sessionId = session.id
                         )
                     )
 
                     SummerLog.i(TAG, "Action result: isSuccess=${actionResult.isSuccess} type=${actionResult::class.java.simpleName}")
 
-                    // Update response message based on action outcome
                     finalResponse = when (actionResult) {
                         is ActionResult.Success -> {
                             finalResponse.copy(
-                                text = "${finalResponse.text} ${actionResult.output}"
+                                text = "${finalResponse.text}\nExecution outcome: ${actionResult.message}"
                             )
                         }
                         is ActionResult.Denied -> {
                             finalResponse.copy(
-                                text = "Action [${action.actionName}] blocked by security policy: ${actionResult.reason}",
+                                text = "${finalResponse.text}\nExecution denied: ${actionResult.message}",
                                 type = ResponseType.ERROR
                             )
                         }
-                        is ActionResult.PendingConsent -> {
+                        is ActionResult.Failure -> {
                             finalResponse.copy(
-                                text = "Action [${action.actionName}] requires confirmation: ${actionResult.prompt}",
-                                type = ResponseType.CONFIRMATION
-                            )
-                        }
-                        is ActionResult.Failed -> {
-                            finalResponse.copy(
-                                text = "Action [${action.actionName}] failed: ${actionResult.error}",
+                                text = "${finalResponse.text}\nExecution fault: ${actionResult.message}",
                                 type = ResponseType.ERROR
                             )
                         }
@@ -239,18 +202,24 @@ class SummerOrchestrator(
                 }
             }
 
-            // 8. Execute memory operations if any
-            if (decision.memoryOperations.isNotEmpty()) {
-                stateManager.transitionTo(SummerState.Learning("Updating local memory"), cause = "Memory persistence")
+            if (settings.personalMemoryEnabled) {
+                stateManager.transitionTo(SummerState.Learning("Interaction consolidation"), cause = "Memory persistence")
+
+                memoryRepository.recordMemory(
+                    MemoryRecord(
+                        category = MemoryCategory.CONVERSATION,
+                        title = "User Input",
+                        content = input
+                    )
+                )
+
                 for (op in decision.memoryOperations) {
                     when (op) {
                         is MemoryOperation.Store -> {
                             memoryRepository.recordMemory(op.record)
                             SummerLog.i(TAG, "Memory stored: category=${op.record.category} title=${op.record.title}")
                         }
-                        is MemoryOperation.Forget -> {
-                            // Deferred to memory phase
-                        }
+                        is MemoryOperation.Forget -> {}
                         is MemoryOperation.Update -> {
                             memoryRepository.recordMemory(op.record)
                         }
@@ -258,20 +227,8 @@ class SummerOrchestrator(
                 }
             }
 
-            // 9. Store conversation in local memory (distinguishing conversation memory from learned memory)
-            if (currentSettings.personalMemoryEnabled) {
-                memoryRepository.recordMemory(
-                    MemoryRecord(
-                        category = MemoryCategory.CONVERSATION_MEMORY,
-                        title = "Query: ${trimmedInput.take(30)}",
-                        content = "User: $trimmedInput | Summer: ${finalResponse.text}"
-                    )
-                )
-            }
-
-            // 10. Responding state & speaking transition
             interaction = interaction.copy(
-                processingState = InteractionState.RESPONDING,
+                state = InteractionState.RESPONDING,
                 response = finalResponse
             )
             _currentInteraction.value = interaction
@@ -281,22 +238,19 @@ class SummerOrchestrator(
 
             stateManager.transitionTo(
                 SummerState.Speaking(finalResponse.text),
-                cause = "Delivering response"
+                cause = "Delivering response to user"
             )
 
-            // Pacing delay for natural feedback before returning to idle
-            delay(1200)
-
-            // 11. Completion
             val completedInteraction = interaction.copy(
-                processingState = InteractionState.COMPLETED,
-                completedTimestamp = System.currentTimeMillis()
+                state = InteractionState.COMPLETED,
+                completionTimestamp = System.currentTimeMillis()
             )
             _currentInteraction.value = completedInteraction
-            _interactionHistory.update { (listOf(completedInteraction) + it).take(50) }
+            _interactionHistory.update { listOf(completedInteraction) + it.take(49) }
             sessionManager.recordInteraction(completedInteraction)
 
-            stateManager.resetToIdle(cause = "Interaction completed")
+            stateManager.transitionTo(SummerState.Idle, cause = "Interaction sequence completed")
+
             return completedInteraction
 
         } catch (e: Exception) {
@@ -305,56 +259,27 @@ class SummerOrchestrator(
             val errorResponse = SummerResponse(
                 text = "An internal processing error occurred: ${e.message ?: "Unknown fault"}",
                 type = ResponseType.ERROR,
-                confidence = 0f,
-                source = "Summer Fault Recovery"
+                source = "Orchestrator Safeguard"
+            )
+
+            stateManager.transitionTo(
+                SummerState.Error(e.message ?: "Internal fault"),
+                cause = "Exception caught in orchestration pipeline"
             )
 
             val failedInteraction = interaction.copy(
-                processingState = InteractionState.FAILED,
+                state = InteractionState.FAILED,
                 response = errorResponse,
-                errorMessage = e.message,
-                completedTimestamp = System.currentTimeMillis()
+                completionTimestamp = System.currentTimeMillis()
             )
 
             _currentInteraction.value = failedInteraction
             _latestResponse.value = errorResponse
-            _interactionHistory.update { (listOf(failedInteraction) + it).take(50) }
-            sessionManager.recordInteraction(failedInteraction)
+            _interactionHistory.update { listOf(failedInteraction) + it.take(49) }
 
-            stateManager.transitionTo(
-                SummerState.Error(e.message ?: "Unknown cognitive processing failure"),
-                cause = "Pipeline exception"
-            )
-            delay(1500)
-            stateManager.resetToIdle(cause = "Recovery from error")
+            stateManager.transitionTo(SummerState.Idle, cause = "Recovered to idle state")
 
             return failedInteraction
-        }
-    }
-
-    /**
-     * Generic event handler for system and sensor events entering Summer.
-     */
-    suspend fun handleEvent(event: SummerEvent): SummerInteraction? {
-        return when (event) {
-            is SummerEvent.UserTextInput -> {
-                handleUserInput(event.text, source = event.source)
-            }
-            is SummerEvent.NetworkStateChanged -> {
-                SummerLog.i(TAG, "Observed network change: ${event.newState}")
-                null
-            }
-            is SummerEvent.SystemEvent -> {
-                SummerLog.i(TAG, "System event: ${event.eventName} - ${event.details}")
-                null
-            }
-            is SummerEvent.VoiceInput -> {
-                handleUserInput(event.transcript, source = event.source)
-            }
-            else -> {
-                SummerLog.d(TAG, "Unhandled event type: ${event::class.java.simpleName}")
-                null
-            }
         }
     }
 }

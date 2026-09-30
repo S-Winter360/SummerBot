@@ -21,20 +21,24 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.CloudQueue
 import androidx.compose.material.icons.filled.Hearing
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Psychology
 import androidx.compose.material.icons.filled.RecordVoiceOver
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.Storage
 import androidx.compose.material.icons.filled.TouchApp
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
@@ -44,7 +48,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.example.ai.capability.AIDiagnostics
+import com.example.ai.capability.AIAvailabilityStatus
+import com.example.ai.capability.AIProviderType
 import com.example.memory.models.SummerSettings
 import com.example.ui.theme.CoreBlack
 import com.example.ui.theme.CoreCharcoalBorder
@@ -55,11 +63,16 @@ import com.example.ui.theme.CyanLuminous
 import com.example.ui.theme.SlateBright
 import com.example.ui.theme.SlateLight
 import com.example.ui.theme.SlateMuted
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 @Composable
 fun SettingsScreen(
     settings: SummerSettings,
+    aiDiagnostics: AIDiagnostics = AIDiagnostics(),
     onUpdateSettings: (SummerSettings) -> Unit,
+    onRefreshAIDiagnostics: () -> Unit = {},
     onNavigateBack: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -123,6 +136,19 @@ fun SettingsScreen(
             checked = settings.summerEnabled,
             onCheckedChange = { onUpdateSettings(settings.copy(summerEnabled = it)) },
             tag = "toggle_summer_enabled"
+        )
+
+        // Phase 0C-R1: Local AI & Capability Diagnostics
+        Text(
+            text = "LOCAL AI & CAPABILITY DIAGNOSTICS",
+            style = MaterialTheme.typography.labelSmall,
+            color = CyanLuminous,
+            modifier = Modifier.padding(top = 8.dp, start = 4.dp)
+        )
+
+        AIDiagnosticsCard(
+            diagnostics = aiDiagnostics,
+            onRefresh = onRefreshAIDiagnostics
         )
 
         // Section: Voice & Audio Interaction
@@ -248,6 +274,194 @@ fun SettingsScreen(
         }
 
         Spacer(modifier = Modifier.height(24.dp))
+    }
+}
+
+@Composable
+private fun AIDiagnosticsCard(
+    diagnostics: AIDiagnostics,
+    onRefresh: () -> Unit
+) {
+    val formattedTime = SimpleDateFormat("h:mm:ss a", Locale.getDefault()).format(Date(diagnostics.lastCheckedTimestamp))
+
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag("ai_diagnostics_card"),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = CoreCharcoalSurface.copy(alpha = 0.9f)
+        ),
+        border = androidx.compose.foundation.BorderStroke(1.dp, CoreCharcoalBorder.copy(alpha = 0.8f))
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(36.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(CoreCharcoalElevated),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.AutoAwesome,
+                            contentDescription = null,
+                            tint = CyanLuminous,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+                    Column {
+                        Text(
+                            text = "Local AI Engine",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.SemiBold,
+                            color = SlateBright
+                        )
+                        Text(
+                            text = "Official Prompt API Status",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = SlateMuted
+                        )
+                    }
+                }
+
+                // Status Badge
+                val (badgeColor, textColor) = when (diagnostics.runtimeStatus) {
+                    AIAvailabilityStatus.AVAILABLE -> Pair(CyanLuminous.copy(alpha = 0.2f), CyanBright)
+                    AIAvailabilityStatus.DOWNLOADABLE -> Pair(CyanLuminous.copy(alpha = 0.15f), CyanLuminous)
+                    AIAvailabilityStatus.DOWNLOADING -> Pair(CyanLuminous.copy(alpha = 0.15f), CyanBright)
+                    AIAvailabilityStatus.CHECKING -> Pair(CoreCharcoalElevated, SlateLight)
+                    AIAvailabilityStatus.UNAVAILABLE, AIAvailabilityStatus.NOT_SUPPORTED -> Pair(CoreCharcoalElevated, SlateMuted)
+                    AIAvailabilityStatus.ERROR -> Pair(MaterialTheme.colorScheme.error.copy(alpha = 0.2f), MaterialTheme.colorScheme.error)
+                }
+
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(badgeColor)
+                        .padding(horizontal = 8.dp, vertical = 4.dp)
+                ) {
+                    Text(
+                        text = diagnostics.runtimeStatus.label.uppercase(),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = textColor,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
+
+            // Explanatory status description
+            val statusExplanation = when (diagnostics.runtimeStatus) {
+                AIAvailabilityStatus.AVAILABLE -> "On-device GenAI available"
+                AIAvailabilityStatus.DOWNLOADABLE -> "Gemini Nano can be installed on this device."
+                AIAvailabilityStatus.DOWNLOADING -> "Gemini Nano is currently downloading."
+                AIAvailabilityStatus.UNAVAILABLE -> "On-device GenAI unavailable"
+                AIAvailabilityStatus.NOT_SUPPORTED -> "On-device GenAI not supported"
+                AIAvailabilityStatus.CHECKING -> "Checking local AI capability..."
+                AIAvailabilityStatus.ERROR -> "Capability check error"
+            }
+
+            Text(
+                text = statusExplanation,
+                style = MaterialTheme.typography.bodySmall,
+                color = if (diagnostics.runtimeStatus == AIAvailabilityStatus.AVAILABLE) CyanBright else SlateLight,
+                fontWeight = FontWeight.Medium
+            )
+
+            // Rule 17: Distinguish Detected Provider from Active Provider
+            DiagnosticRow(label = "Detected Provider", value = diagnostics.detectedProvider.displayName)
+            DiagnosticRow(
+                label = "Active Provider",
+                value = if (diagnostics.activeProvider == AIProviderType.ON_DEVICE_GENAI) "On-Device GenAI" else "Deterministic Local"
+            )
+            DiagnosticRow(label = "Active Model", value = diagnostics.currentModel)
+            DiagnosticRow(
+                label = "Capabilities",
+                value = if (diagnostics.supportedCapabilities.isEmpty()) "Not available"
+                else diagnostics.supportedCapabilities.joinToString(", ") { it.title }
+            )
+            DiagnosticRow(
+                label = "Fallback Status",
+                value = if (diagnostics.isFallbackActive) "Active (Deterministic Core)" else "Standby"
+            )
+            DiagnosticRow(
+                label = "AICore Present",
+                value = if (diagnostics.isAiCoreInstalled) "Installed" else "Not detected"
+            )
+            DiagnosticRow(
+                label = "Device Profile",
+                value = "Android API ${diagnostics.deviceApiLevel} (${diagnostics.deviceManufacturer} ${diagnostics.deviceModel})"
+            )
+            DiagnosticRow(
+                label = "Network Status",
+                value = if (diagnostics.isNetworkAvailable) "Online" else "Offline"
+            )
+            DiagnosticRow(label = "Last Checked", value = formattedTime)
+
+            if (diagnostics.errorMessage != null) {
+                Text(
+                    text = "Status notice: ${diagnostics.errorMessage}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error
+                )
+            }
+
+            OutlinedButton(
+                onClick = onRefresh,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 4.dp)
+                    .testTag("refresh_ai_status_button"),
+                shape = RoundedCornerShape(10.dp),
+                colors = ButtonDefaults.outlinedButtonColors(
+                    contentColor = CyanLuminous
+                ),
+                border = androidx.compose.foundation.BorderStroke(1.dp, CyanLuminous.copy(alpha = 0.4f))
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Refresh,
+                    contentDescription = null,
+                    modifier = Modifier.size(16.dp)
+                )
+                Spacer(modifier = Modifier.size(8.dp))
+                Text(
+                    text = "Refresh AI Status",
+                    style = MaterialTheme.typography.labelMedium
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun DiagnosticRow(label: String, value: String) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.bodySmall,
+            color = SlateLight
+        )
+        Text(
+            text = value,
+            style = MaterialTheme.typography.bodySmall,
+            color = SlateBright,
+            fontWeight = FontWeight.Medium
+        )
     }
 }
 

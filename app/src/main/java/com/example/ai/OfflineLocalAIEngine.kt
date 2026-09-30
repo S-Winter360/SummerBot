@@ -19,11 +19,6 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-/**
- * Deterministic local reasoning engine for Summer's architectural foundation phase.
- * Demonstrates the intent classification, context ingestion, and structured result generation
- * without pretending to run a heavyweight LLM.
- */
 class OfflineLocalAIEngine(
     private val personality: SummerPersonality = SummerPersonality.DEFAULT
 ) : AIEngine {
@@ -41,35 +36,24 @@ class OfflineLocalAIEngine(
         val normalized = input.trim().lowercase(Locale.ROOT)
 
         return when {
-            normalized.isEmpty() -> {
-                SummerIntent.Unknown(input)
-            }
+            normalized.isEmpty() -> SummerIntent.Unknown(input)
 
-            // Greeting matches: "hello", "hello summer", "hi", "hey summer", "greetings"
             normalized.startsWith("hello") || normalized.startsWith("hi") ||
-                normalized.startsWith("hey") || normalized.contains("greetings") -> {
+                normalized.startsWith("hey") || normalized.contains("greetings") ->
                 SummerIntent.Greeting(input)
-            }
 
-            // Identity matches: "what is your name", "who are you", "what's your name"
-            normalized.contains("your name") || normalized.contains("who are you") -> {
+            normalized.contains("your name") || normalized.contains("who are you") ->
                 SummerIntent.IdentityQuestion(input)
-            }
 
-            // Capability matches: "what can you do", "help", "capabilities"
             normalized.contains("what can you do") || normalized.contains("capabilities") ||
-                normalized == "help" -> {
+                normalized == "help" ->
                 SummerIntent.CapabilityQuestion(input)
-            }
 
-            // Time query matches: "what time is it", "current time", "what is the time", "time"
             normalized.contains("what time is it") || normalized.contains("current time") ||
-                normalized.contains("what is the time") || normalized == "time" -> {
+                normalized.contains("what is the time") || normalized == "time" ->
                 SummerIntent.TimeQuery(input)
-            }
 
-            // Capability action: Network test
-            normalized.contains("test network") || normalized.contains("connect internet") -> {
+            normalized.contains("test network") || normalized.contains("connect internet") ->
                 SummerIntent.CapabilityAction(
                     ActionRequest(
                         capability = Capability.INTERNET,
@@ -78,10 +62,8 @@ class OfflineLocalAIEngine(
                     ),
                     rawQuery = input
                 )
-            }
 
-            // Capability action: Microphone test
-            normalized.contains("test mic") || normalized.contains("test audio") || normalized.contains("listen") -> {
+            normalized.contains("test mic") || normalized.contains("test audio") || normalized.contains("listen") ->
                 SummerIntent.CapabilityAction(
                     ActionRequest(
                         capability = Capability.MICROPHONE,
@@ -90,56 +72,36 @@ class OfflineLocalAIEngine(
                     ),
                     rawQuery = input
                 )
-            }
 
-            // Capability action: Camera test
-            normalized.contains("test camera") || normalized.contains("test vision") || normalized.contains("inspect camera") -> {
+            normalized.contains("test camera") || normalized.contains("test vision") ->
                 SummerIntent.CapabilityAction(
                     ActionRequest(
                         capability = Capability.CAMERA,
                         actionName = "Analyze Visual Frame",
-                        reasoning = "User initiated request to test vision sensor authorization."
+                        reasoning = "User initiated request to inspect camera frame authorization."
                     ),
                     rawQuery = input
                 )
+
+            normalized.startsWith("remember ") -> {
+                val fact = input.substringAfter("remember ").trim()
+                SummerIntent.GeneralConversation("Remembering: $fact", rawQuery = input)
             }
 
-            // Capability action: Memory persistence
-            normalized.startsWith("remember") || normalized.startsWith("save memory") || normalized.startsWith("note:") -> {
-                val contentToSave = input.removePrefix("remember").removePrefix("save memory").removePrefix("note:").trim()
-                SummerIntent.CapabilityAction(
-                    ActionRequest(
-                        capability = Capability.LOCAL_MEMORY_WRITE,
-                        actionName = "Persist Memory Record",
-                        parameters = mapOf("content" to contentToSave.ifEmpty { input }),
-                        reasoning = "User explicitly requested storing data into local memory repository."
-                    ),
-                    rawQuery = input
-                )
-            }
-
-            else -> {
-                SummerIntent.Unknown(input)
-            }
+            else -> SummerIntent.Unknown(input)
         }
     }
 
-    override suspend fun process(
-        context: SummerContext,
-        interaction: SummerInteraction
-    ): AIResult {
+    override suspend fun process(context: SummerContext, interaction: SummerInteraction): AIResult {
         val intent = classifyIntent(interaction.userInput)
 
         return when (intent) {
             is SummerIntent.Greeting -> {
-                val text = "Hello. I'm ${personality.shortName}. How can I assist you?"
                 AIResult(
                     intent = intent,
                     response = SummerResponse(
-                        text = text,
+                        text = "Hello. I'm ${personality.shortName}. How can I assist you?",
                         type = ResponseType.TEXT,
-                        confidence = 1.0f,
-                        isSpeechAppropriate = true,
                         source = modelInfo.name
                     ),
                     confidence = 1.0f
@@ -147,14 +109,11 @@ class OfflineLocalAIEngine(
             }
 
             is SummerIntent.IdentityQuestion -> {
-                val text = "I'm ${personality.name}. You can call me ${personality.shortName}."
                 AIResult(
                     intent = intent,
                     response = SummerResponse(
-                        text = text,
+                        text = "I'm ${personality.fullName}. You can call me ${personality.shortName}.",
                         type = ResponseType.INFORMATION,
-                        confidence = 1.0f,
-                        isSpeechAppropriate = true,
                         source = modelInfo.name
                     ),
                     confidence = 1.0f
@@ -162,14 +121,11 @@ class OfflineLocalAIEngine(
             }
 
             is SummerIntent.CapabilityQuestion -> {
-                val text = "I am currently under active development. My architecture is being prepared for future voice, persistent memory, vision, device-control, and on-device AI capabilities."
                 AIResult(
                     intent = intent,
                     response = SummerResponse(
-                        text = text,
+                        text = "I am an offline-first cognitive companion. My current local architecture is being prepared for on-device generative reasoning, action security gating, and local memory.",
                         type = ResponseType.INFORMATION,
-                        confidence = 1.0f,
-                        isSpeechAppropriate = true,
                         source = modelInfo.name
                     ),
                     confidence = 1.0f
@@ -177,15 +133,12 @@ class OfflineLocalAIEngine(
             }
 
             is SummerIntent.TimeQuery -> {
-                val currentTime = SimpleDateFormat("h:mm a", Locale.getDefault()).format(Date())
-                val text = "It is currently $currentTime."
+                val timeStr = SimpleDateFormat("h:mm a", Locale.getDefault()).format(Date())
                 AIResult(
                     intent = intent,
                     response = SummerResponse(
-                        text = text,
+                        text = "The current local time is $timeStr.",
                         type = ResponseType.INFORMATION,
-                        confidence = 1.0f,
-                        isSpeechAppropriate = true,
                         source = modelInfo.name
                     ),
                     confidence = 1.0f
@@ -193,95 +146,82 @@ class OfflineLocalAIEngine(
             }
 
             is SummerIntent.CapabilityAction -> {
-                val action = intent.actionRequest
-                val proposalText = "Action requested: [${action.actionName}]. Routing through Summer's security authorization gatekeeper."
-                val memorySuggestions = if (action.capability == Capability.LOCAL_MEMORY_WRITE) {
-                    val content = action.parameters["content"] ?: interaction.userInput
-                    listOf(
-                        MemoryRecord(
-                            category = MemoryCategory.LEARNED_FACT,
-                            title = "Explicit User Fact",
-                            content = content
-                        )
-                    )
-                } else {
-                    emptyList()
-                }
-
                 AIResult(
                     intent = intent,
                     response = SummerResponse(
-                        text = proposalText,
+                        text = "Initiating authorized execution for [${intent.actionRequest.actionName}].",
                         type = ResponseType.ACTION_PROPOSAL,
-                        confidence = 1.0f,
-                        actionRequests = listOf(action),
+                        suggestedActions = listOf(intent.actionRequest),
                         source = modelInfo.name
                     ),
-                    actionRequests = listOf(action),
-                    memorySuggestions = memorySuggestions,
+                    actionRequests = listOf(intent.actionRequest),
                     confidence = 1.0f
                 )
             }
 
             is SummerIntent.GeneralConversation -> {
-                val text = "I received your query. In this architectural phase, local model pipelines and cognitive state transitions are verified."
-                AIResult(
-                    intent = intent,
-                    response = SummerResponse(
-                        text = text,
-                        type = ResponseType.TEXT,
-                        confidence = intent.confidence,
-                        source = modelInfo.name
-                    ),
-                    confidence = intent.confidence
-                )
+                if (interaction.userInput.startsWith("remember ", ignoreCase = true)) {
+                    val fact = interaction.userInput.substringAfter("remember ").trim()
+                    val memoryRecord = MemoryRecord(
+                        category = MemoryCategory.FACTUAL_KNOWLEDGE,
+                        title = "User Fact",
+                        content = fact
+                    )
+                    AIResult(
+                        intent = intent,
+                        response = SummerResponse(
+                            text = "I have noted that in local memory: \"$fact\".",
+                            type = ResponseType.TEXT,
+                            source = modelInfo.name
+                        ),
+                        memorySuggestions = listOf(memoryRecord),
+                        confidence = 1.0f
+                    )
+                } else {
+                    AIResult(
+                        intent = intent,
+                        response = SummerResponse(
+                            text = "Received: ${intent.text}. Deterministic engine has logged this interaction.",
+                            type = ResponseType.TEXT,
+                            source = modelInfo.name
+                        ),
+                        confidence = 0.8f
+                    )
+                }
             }
 
             is SummerIntent.Unknown -> {
-                val text = "I don't have enough understanding for that yet. My local intelligence module is still being developed."
                 AIResult(
                     intent = intent,
                     response = SummerResponse(
-                        text = text,
+                        text = "I don't have enough understanding for that yet. My local intelligence module is still being developed.",
                         type = ResponseType.TEXT,
-                        confidence = 0.2f,
                         source = modelInfo.name
                     ),
-                    confidence = 0.2f
+                    confidence = 0.0f
                 )
             }
-        }
-    }
-
-    // --- Backward compatibility implementations ---
-
-    override suspend fun evaluateIntent(input: String): RecognizedIntent {
-        val classified = classifyIntent(input)
-        return when (classified) {
-            is SummerIntent.Greeting -> RecognizedIntent.GeneralConversation(input)
-            is SummerIntent.IdentityQuestion -> RecognizedIntent.PersonalityQuery(input)
-            is SummerIntent.CapabilityQuestion -> RecognizedIntent.SystemStatus(input)
-            is SummerIntent.TimeQuery -> RecognizedIntent.GeneralConversation(input)
-            is SummerIntent.CapabilityAction -> RecognizedIntent.CapabilityRequest(classified.actionRequest)
-            is SummerIntent.GeneralConversation -> RecognizedIntent.GeneralConversation(input)
-            is SummerIntent.Unknown -> RecognizedIntent.GeneralConversation(input)
         }
     }
 
     override suspend fun processQuery(request: AIRequest): AIResponse {
-        val dummyInteraction = SummerInteraction(
-            sessionId = request.conversationId,
-            userInput = request.query
-        )
-        val dummyContext = SummerContext(sessionId = request.conversationId)
-        val result = process(dummyContext, dummyInteraction)
-        val legacyIntent = evaluateIntent(request.query)
-
+        val intent = classifyIntent(request.query)
+        val recognized = when (intent) {
+            is SummerIntent.Greeting -> RecognizedIntent.GeneralConversation("Greeting")
+            is SummerIntent.IdentityQuestion -> RecognizedIntent.PersonalityQuery(request.query)
+            is SummerIntent.CapabilityQuestion -> RecognizedIntent.SystemStatus("Capabilities")
+            is SummerIntent.TimeQuery -> RecognizedIntent.SystemStatus("Time")
+            is SummerIntent.CapabilityAction -> RecognizedIntent.CapabilityRequest(intent.actionRequest)
+            else -> RecognizedIntent.GeneralConversation(request.query)
+        }
         return AIResponse(
-            text = result.response.text,
+            text = "Legacy query processed by ${modelInfo.name}.",
             modelUsed = modelInfo.name,
-            recognizedIntent = legacyIntent,
-            requiredAction = result.actionRequests.firstOrNull()
+            recognizedIntent = recognized
         )
+    }
+
+    override suspend fun evaluateIntent(input: String): RecognizedIntent {
+        return RecognizedIntent.GeneralConversation(input)
     }
 }
