@@ -74,6 +74,8 @@ fun SettingsScreen(
     aiDiagnostics: AIDiagnostics = AIDiagnostics(),
     onUpdateSettings: (SummerSettings) -> Unit,
     onRefreshAIDiagnostics: () -> Unit = {},
+    onClearMemories: () -> Unit = {},
+    onClearConversation: () -> Unit = {},
     onNavigateBack: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -246,6 +248,14 @@ fun SettingsScreen(
             checked = settings.learningEnabled,
             onCheckedChange = { onUpdateSettings(settings.copy(learningEnabled = it)) },
             tag = "toggle_learning"
+        )
+
+        // Local Memory & Context Subsystem Card
+        MemoryDiagnosticsCard(
+            settings = settings,
+            diagnostics = aiDiagnostics,
+            onClearMemories = onClearMemories,
+            onClearConversation = onClearConversation
         )
 
         // Architecture diagnostic footer card
@@ -533,6 +543,119 @@ private fun SettingsToggleCard(
                     uncheckedBorderColor = CoreCharcoalBorder
                 )
             )
+        }
+    }
+}
+
+@Composable
+private fun MemoryDiagnosticsCard(
+    settings: SummerSettings,
+    diagnostics: AIDiagnostics,
+    onClearMemories: () -> Unit,
+    onClearConversation: () -> Unit
+) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag("memory_diagnostics_card"),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = CoreCharcoalSurface.copy(alpha = 0.9f)
+        ),
+        border = androidx.compose.foundation.BorderStroke(1.dp, CoreCharcoalBorder.copy(alpha = 0.8f))
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(36.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(CoreCharcoalElevated),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Storage,
+                            contentDescription = null,
+                            tint = CyanLuminous,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+                    Column {
+                        Text(
+                            text = "Memory & Context",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.SemiBold,
+                            color = SlateBright
+                        )
+                        Text(
+                            text = "Deterministic Bounded Subsystem",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = SlateMuted
+                        )
+                    }
+                }
+
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(if (settings.personalMemoryEnabled) CyanLuminous.copy(alpha = 0.2f) else CoreCharcoalElevated)
+                        .padding(horizontal = 8.dp, vertical = 4.dp)
+                ) {
+                    Text(
+                        text = if (settings.personalMemoryEnabled) "ACTIVE" else "DISABLED",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = if (settings.personalMemoryEnabled) CyanBright else SlateMuted,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
+
+            DiagnosticRow(label = "Persistent Storage", value = "On-Device SQLite (Room)")
+            DiagnosticRow(label = "Context Bounding", value = "Max 5 memories / 6 dialogue turns")
+            DiagnosticRow(label = "Relevance Engine", value = "Deterministic local lexical scoring")
+            DiagnosticRow(label = "Memory Isolation", value = "Explicit intent required (Zero automatic leak)")
+
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                OutlinedButton(
+                    onClick = onClearConversation,
+                    modifier = Modifier
+                        .weight(1f)
+                        .testTag("clear_conversation_button"),
+                    shape = RoundedCornerShape(16.dp),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = SlateLight),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, CoreCharcoalBorder)
+                ) {
+                    Text("Reset Dialogue", style = MaterialTheme.typography.labelSmall)
+                }
+
+                OutlinedButton(
+                    onClick = onClearMemories,
+                    modifier = Modifier
+                        .weight(1f)
+                        .testTag("clear_memories_button"),
+                    shape = RoundedCornerShape(16.dp),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = SlateLight),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, CoreCharcoalBorder)
+                ) {
+                    Text("Clear Memories", style = MaterialTheme.typography.labelSmall)
+                }
+            }
         }
     }
 }

@@ -19,8 +19,15 @@ import com.example.core.session.SummerSessionManager
 import com.example.core.state.SummerState
 import com.example.core.state.SummerStateManager
 import com.example.memory.MemoryRepository
+import com.example.memory.models.ConversationRole
+import com.example.memory.models.ConversationTurn
 import com.example.memory.models.MemoryCategory
+import com.example.memory.models.MemoryContext
 import com.example.memory.models.MemoryRecord
+import com.example.memory.retrieval.DefaultMemoryRetriever
+import com.example.memory.retrieval.MemoryRetriever
+import com.example.memory.validation.MemoryOperationValidator
+import com.example.memory.validation.MemoryValidationResult
 import com.example.network.NetworkInformationProvider
 import com.example.security.ActionAuthorizationPolicy
 import com.example.security.SecurityContext
@@ -74,6 +81,8 @@ class SummerOrchestrator(
     val actionExecutor: ActionExecutor,
     val memoryRepository: MemoryRepository,
     val networkProvider: NetworkInformationProvider,
+    val memoryRetriever: MemoryRetriever = DefaultMemoryRetriever(),
+    val memoryOperationValidator: MemoryOperationValidator = MemoryOperationValidator(),
     private val orchestratorScope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 ) {
     companion object {
@@ -129,26 +138,75 @@ class SummerOrchestrator(
             val settings = memoryRepository.getSettings()
             val netState = networkProvider.getCurrentState()
 
+            // 1. Retrieve Candidate Memories from Local Persistent Store
+            val allActiveMemories = if (settings.personalMemoryEnabled) {
+                try {
+                    memoryRepository.getActiveMemories()
+                } catch (t: Throwable) {
+                    SummerLog.w(TAG, "Failed to load active memories", t)
+                    emptyList()
+                }
+            } else {
+                emptyList()
+            }
+
+            // 2. Select Relevant Bounded Memories using Local Scoring
+            val relevantMemories = if (allActiveMemories.isNotEmpty()) {
+                memoryRetriever.retrieveRelevantMemories(
+                    query = input,
+                    allMemories = allActiveMemories,
+                    maxResults = 5
+                )
+            } else {
+                emptyList()
+            }
+
+            // 3. Map Short-Term Session Dialogue into Bounded Conversation Turns
+            val recentTurns = session.interactions.takeLast(6).flatMap { past ->
+                val turns = mutableListOf<ConversationTurn>()
+                turns.add(ConversationTurn(role = ConversationRole.USER, text = past.userInput, timestamp = past.timestamp))
+                if (past.response != null) {
+                    turns.add(ConversationTurn(role = ConversationRole.ASSISTANT, text = past.response.text, timestamp = past.response.timestamp))
+                }
+                turns
+            }
+
+            val memoryContext = MemoryContext(
+                relevantMemories = relevantMemories,
+                recentConversation = recentTurns,
+                activeSessionId = session.id,
+                retrievalMetadata = mapOf("retrievedCount" to relevantMemories.size.toString())
+            )
+
             val context = SummerContext(
                 sessionId = session.id,
                 recentInteractions = session.interactions.takeLast(5),
+                conversationTurns = recentTurns,
+                activeMemories = relevantMemories,
+                memoryContext = memoryContext,
                 networkState = netState,
                 currentState = stateManager.state.value,
                 settings = settings
             )
 
-            interaction = interaction.copy(state = InteractionState.REASONING)
+            interaction = interaction.copy(
+                state = InteractionState.REASONING,
+                referencedMemories = relevantMemories
+            )
             _currentInteraction.value = interaction
 
+            // 4. Invoke AI Engine (Gemini Nano if AVAILABLE, or OfflineLocalAIEngine fallback)
             val aiResult = aiEngine.process(context, interaction)
             SummerLog.i(TAG, "Intent identified: ${aiResult.intent::class.java.simpleName} confidence=${aiResult.confidence}")
 
+            // 5. Synthesize Decision
             val decision = decisionEngine.decide(aiResult, context)
-            SummerLog.i(TAG, "Decision generated: requiresConfirmation=${decision.requiresConfirmation} actions=${decision.actionRequests.size}")
+            SummerLog.i(TAG, "Decision generated: requiresConfirmation=${decision.requiresConfirmation} actions=${decision.actionRequests.size} memoryOps=${decision.memoryOperations.size}")
 
             var finalResponse = decision.response
             val actionResults = mutableListOf<ActionResult>()
 
+            // 6. Execute Approved Actions Through Security Pipeline
             if (decision.actionRequests.isNotEmpty()) {
                 interaction = interaction.copy(state = InteractionState.EXECUTING)
                 _currentInteraction.value = interaction
@@ -202,28 +260,65 @@ class SummerOrchestrator(
                 }
             }
 
-            if (settings.personalMemoryEnabled) {
-                stateManager.transitionTo(SummerState.Learning("Interaction consolidation"), cause = "Memory persistence")
-
-                memoryRepository.recordMemory(
-                    MemoryRecord(
-                        category = MemoryCategory.CONVERSATION,
-                        title = "User Input",
-                        content = input
-                    )
-                )
+            // 7. Validate & Persist Explicit Memory Operations
+            if (settings.personalMemoryEnabled && decision.memoryOperations.isNotEmpty()) {
+                stateManager.transitionTo(SummerState.Learning("Memory consolidation"), cause = "Explicit memory operation")
 
                 for (op in decision.memoryOperations) {
-                    when (op) {
-                        is MemoryOperation.Store -> {
-                            memoryRepository.recordMemory(op.record)
-                            SummerLog.i(TAG, "Memory stored: category=${op.record.category} title=${op.record.title}")
+                    val validation = memoryOperationValidator.validate(op)
+                    if (validation is MemoryValidationResult.Valid) {
+                        when (val validOp = validation.operation) {
+                            is MemoryOperation.Store -> {
+                                memoryRepository.recordMemory(validOp.record)
+                                SummerLog.i(TAG, "Explicit memory stored: category=${validOp.record.category} content=${validOp.record.content}")
+                            }
+                            is MemoryOperation.Update -> {
+                                if (validOp.targetId != null) {
+                                    memoryRepository.updateMemory(validOp.record.copy(id = validOp.targetId))
+                                } else {
+                                    // Match against existing memories by content or title
+                                    val match = allActiveMemories.firstOrNull {
+                                        it.content.contains(validOp.previousContent ?: "", ignoreCase = true) ||
+                                            it.title.contains(validOp.previousContent ?: "", ignoreCase = true)
+                                    }
+                                    if (match != null) {
+                                        memoryRepository.updateMemory(validOp.record.copy(id = match.id))
+                                    } else {
+                                        memoryRepository.recordMemory(validOp.record)
+                                    }
+                                }
+                                SummerLog.i(TAG, "Memory updated: content=${validOp.record.content}")
+                            }
+                            is MemoryOperation.Forget -> {
+                                val deleted = memoryRepository.forgetMemory(
+                                    targetId = validOp.targetId,
+                                    keyword = validOp.keywordOrContent
+                                )
+                                SummerLog.i(TAG, "Memory forget performed (success=$deleted): target=${validOp.keywordOrContent ?: validOp.targetId}")
+                            }
+                            is MemoryOperation.ClearAll -> {
+                                memoryRepository.clearAllMemories()
+                                SummerLog.i(TAG, "All memories cleared via operation")
+                            }
                         }
-                        is MemoryOperation.Forget -> {}
-                        is MemoryOperation.Update -> {
-                            memoryRepository.recordMemory(op.record)
-                        }
+                    } else if (validation is MemoryValidationResult.Invalid) {
+                        SummerLog.w(TAG, "Memory operation rejected by validator: ${validation.reason}")
                     }
+                }
+            }
+
+            // 8. Update Memory Access Metadata for Retrieved Records (Non-blocking)
+            if (relevantMemories.isNotEmpty()) {
+                try {
+                    for (mem in relevantMemories) {
+                        memoryRepository.updateAccessMetadata(
+                            id = mem.id,
+                            count = mem.accessCount + 1,
+                            timestamp = System.currentTimeMillis()
+                        )
+                    }
+                } catch (t: Throwable) {
+                    SummerLog.w(TAG, "Error updating memory access metadata", t)
                 }
             }
 

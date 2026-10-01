@@ -10,7 +10,11 @@ interface SummerDecisionEngine {
 
 class DefaultSummerDecisionEngine : SummerDecisionEngine {
     override fun decide(aiResult: AIResult, context: SummerContext): SummerDecision {
-        val memoryOps = aiResult.memorySuggestions.map { MemoryOperation.Store(it) }
+        val memoryOps = if (aiResult.response.memoryOperations.isNotEmpty()) {
+            aiResult.response.memoryOperations
+        } else {
+            aiResult.memorySuggestions.map { MemoryOperation.Store(it) }
+        }
 
         val requiresConfirmation = aiResult.actionRequests.any {
             it.capability.requiresUserConfirmation

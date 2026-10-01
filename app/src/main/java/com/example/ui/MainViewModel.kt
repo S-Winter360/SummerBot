@@ -193,5 +193,15 @@ class MainViewModel @JvmOverloads constructor(
         }
     }
 
+    fun clearAllMemories() {
+        viewModelScope.launch {
+            memoryRepository.clearAllMemories()
+        }
+    }
+
+    fun clearConversationHistory() {
+        orchestrator.sessionManager.startNewSession()
+    }
+
     fun getPersonality(): SummerPersonality = personality
 }

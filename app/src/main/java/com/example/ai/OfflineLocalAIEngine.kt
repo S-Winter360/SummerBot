@@ -10,10 +10,13 @@ import com.example.core.context.SummerContext
 import com.example.core.interaction.SummerInteraction
 import com.example.core.intent.SummerIntent
 import com.example.core.personality.SummerPersonality
+import com.example.core.response.MemoryOperation
 import com.example.core.response.ResponseType
 import com.example.core.response.SummerResponse
 import com.example.memory.models.MemoryCategory
+import com.example.memory.models.MemoryImportance
 import com.example.memory.models.MemoryRecord
+import com.example.memory.models.MemorySource
 import com.example.security.Capability
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -39,14 +42,16 @@ class OfflineLocalAIEngine(
             normalized.isEmpty() -> SummerIntent.Unknown(input)
 
             normalized.startsWith("hello") || normalized.startsWith("hi") ||
-                normalized.startsWith("hey") || normalized.contains("greetings") ->
+                normalized.startsWith("hey") || normalized.contains("greetings") ||
+                normalized.contains("good morning") ->
                 SummerIntent.Greeting(input)
 
-            normalized.contains("your name") || normalized.contains("who are you") ->
+            normalized.contains("your name") || normalized.contains("who are you") ||
+                normalized.contains("what are you") || normalized.contains("tell me about yourself") ->
                 SummerIntent.IdentityQuestion(input)
 
             normalized.contains("what can you do") || normalized.contains("capabilities") ||
-                normalized == "help" ->
+                normalized.contains("help me with") || normalized == "help" ->
                 SummerIntent.CapabilityQuestion(input)
 
             normalized.contains("what time is it") || normalized.contains("current time") ||
@@ -83,17 +88,30 @@ class OfflineLocalAIEngine(
                     rawQuery = input
                 )
 
-            normalized.startsWith("remember ") -> {
-                val fact = input.substringAfter("remember ").trim()
+            normalized.startsWith("remember ") || normalized.startsWith("keep in mind ") ||
+                normalized.startsWith("please remember ") || normalized.startsWith("save this: ") -> {
+                val fact = input.substringAfter("remember ", input).trim()
                 SummerIntent.GeneralConversation("Remembering: $fact", rawQuery = input)
             }
 
-            else -> SummerIntent.Unknown(input)
+            normalized.startsWith("forget ") || normalized.startsWith("delete memory ") -> {
+                val target = input.substringAfter("forget ", input).trim()
+                SummerIntent.GeneralConversation("Forgetting: $target", rawQuery = input)
+            }
+
+            normalized.startsWith("actually, ") || normalized.startsWith("update my ") ||
+                normalized.startsWith("change my ") -> {
+                SummerIntent.GeneralConversation("Updating memory: $input", rawQuery = input)
+            }
+
+            else -> SummerIntent.GeneralConversation(input, rawQuery = input)
         }
     }
 
     override suspend fun process(context: SummerContext, interaction: SummerInteraction): AIResult {
-        val intent = classifyIntent(interaction.userInput)
+        val userInput = interaction.userInput.trim()
+        val normalized = userInput.lowercase(Locale.ROOT)
+        val intent = classifyIntent(userInput)
 
         return when (intent) {
             is SummerIntent.Greeting -> {
@@ -160,33 +178,114 @@ class OfflineLocalAIEngine(
             }
 
             is SummerIntent.GeneralConversation -> {
-                if (interaction.userInput.startsWith("remember ", ignoreCase = true)) {
-                    val fact = interaction.userInput.substringAfter("remember ").trim()
+                // Check for explicit memory commands
+                if (normalized.startsWith("remember ") || normalized.startsWith("keep in mind ") ||
+                    normalized.startsWith("please remember ") || normalized.startsWith("save this: ")
+                ) {
+                    var fact = when {
+                        normalized.startsWith("remember ") -> userInput.substringAfter("remember ").trim()
+                        normalized.startsWith("keep in mind ") -> userInput.substringAfter("keep in mind ").trim()
+                        normalized.startsWith("please remember ") -> userInput.substringAfter("please remember ").trim()
+                        normalized.startsWith("save this: ") -> userInput.substringAfter("save this: ").trim()
+                        else -> userInput
+                    }
+                    if (fact.startsWith("that ", ignoreCase = true)) {
+                        fact = fact.substring(5).trim()
+                    }
+
                     val memoryRecord = MemoryRecord(
-                        category = MemoryCategory.FACTUAL_KNOWLEDGE,
-                        title = "User Fact",
-                        content = fact
+                        category = MemoryCategory.PREFERENCE,
+                        title = "User Preference",
+                        content = fact,
+                        source = MemorySource.EXPLICIT_USER,
+                        importance = MemoryImportance.NORMAL,
+                        confidence = 1.0f
                     )
                     AIResult(
                         intent = intent,
                         response = SummerResponse(
                             text = "I have noted that in local memory: \"$fact\".",
                             type = ResponseType.TEXT,
+                            memoryOperations = listOf(MemoryOperation.Store(memoryRecord)),
                             source = modelInfo.name
                         ),
                         memorySuggestions = listOf(memoryRecord),
                         confidence = 1.0f
                     )
-                } else {
+                } else if (normalized.startsWith("forget ") || normalized.startsWith("delete memory ")) {
+                    val target = when {
+                        normalized.startsWith("forget that ") -> userInput.substringAfter("forget that ").trim()
+                        normalized.startsWith("delete memory ") -> userInput.substringAfter("delete memory ").trim()
+                        else -> userInput.substringAfter("forget ").trim()
+                    }
+                    val op = MemoryOperation.Forget(
+                        keywordOrContent = target,
+                        reason = "User requested forget command"
+                    )
                     AIResult(
                         intent = intent,
                         response = SummerResponse(
-                            text = "Received: ${intent.text}. Deterministic engine has logged this interaction.",
+                            text = "I have processed your request to forget: \"$target\".",
                             type = ResponseType.TEXT,
+                            memoryOperations = listOf(op),
                             source = modelInfo.name
                         ),
-                        confidence = 0.8f
+                        confidence = 1.0f
                     )
+                } else if (normalized.startsWith("actually, ") || normalized.startsWith("update my ")) {
+                    val updatedFact = when {
+                        normalized.startsWith("actually, ") -> userInput.substringAfter("actually, ").trim()
+                        normalized.startsWith("update my ") -> userInput.substringAfter("update my ").trim()
+                        else -> userInput
+                    }
+                    val updatedRecord = MemoryRecord(
+                        category = MemoryCategory.PREFERENCE,
+                        title = "Updated Preference",
+                        content = updatedFact,
+                        source = MemorySource.USER_UPDATE,
+                        importance = MemoryImportance.NORMAL,
+                        confidence = 1.0f
+                    )
+                    val op = MemoryOperation.Update(
+                        record = updatedRecord,
+                        previousContent = updatedFact
+                    )
+                    AIResult(
+                        intent = intent,
+                        response = SummerResponse(
+                            text = "I have updated your memory to: \"$updatedFact\".",
+                            type = ResponseType.TEXT,
+                            memoryOperations = listOf(op),
+                            source = modelInfo.name
+                        ),
+                        memorySuggestions = listOf(updatedRecord),
+                        confidence = 1.0f
+                    )
+                } else {
+                    // Answer from retrieved relevant memories if available in context
+                    val relevantMemories = context.memoryContext?.relevantMemories ?: context.activeMemories
+                    if (relevantMemories.isNotEmpty()) {
+                        val memorySnippet = relevantMemories.first().content
+                        AIResult(
+                            intent = intent,
+                            response = SummerResponse(
+                                text = "Based on your memory: $memorySnippet",
+                                type = ResponseType.TEXT,
+                                source = modelInfo.name
+                            ),
+                            confidence = 0.9f
+                        )
+                    } else {
+                        AIResult(
+                            intent = intent,
+                            response = SummerResponse(
+                                text = "Received: ${intent.text}. Deterministic engine has logged this interaction.",
+                                type = ResponseType.TEXT,
+                                source = modelInfo.name
+                            ),
+                            confidence = 0.8f
+                        )
+                    }
                 }
             }
 

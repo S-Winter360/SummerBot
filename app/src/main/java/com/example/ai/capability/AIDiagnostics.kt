@@ -1,9 +1,9 @@
 package com.example.ai.capability
 
 /**
- * Concise diagnostics summary of Summer's active AI configuration and capability status.
+ * Concise diagnostics summary of Summer's active AI configuration, capability status, and memory subsystem.
  * Intended for presentation in settings and development inspection.
- * Distinguishes between detected provider/status and the active runtime provider.
+ * Distinguishes between detected provider/status, the active runtime provider, and local memory metrics.
  */
 data class AIDiagnostics(
     val detectedProvider: AIProviderType = AIProviderType.ON_DEVICE_GENAI,
@@ -22,7 +22,12 @@ data class AIDiagnostics(
     val isNetworkAvailable: Boolean = false,
     val isAiCoreInstalled: Boolean = false,
     val lastCheckedTimestamp: Long = System.currentTimeMillis(),
-    val errorMessage: String? = null
+    val errorMessage: String? = null,
+    val memorySystemActive: Boolean = true,
+    val persistentMemoryCount: Int = 0,
+    val recentTurnCount: Int = 0,
+    val lastRetrievedMemoryCount: Int = 0,
+    val lastMemoryOperation: String = "NONE"
 ) {
     // Backward-compatible properties
     val currentProvider: AIProviderType get() = activeProvider

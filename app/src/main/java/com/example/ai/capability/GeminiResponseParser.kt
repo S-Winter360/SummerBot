@@ -4,21 +4,25 @@ import com.example.actions.ActionRequest
 import com.example.ai.models.AIResult
 import com.example.core.interaction.SummerInteraction
 import com.example.core.intent.SummerIntent
+import com.example.core.response.MemoryOperation
 import com.example.core.response.ResponseType
 import com.example.core.response.SummerResponse
 import com.example.memory.models.MemoryCategory
+import com.example.memory.models.MemoryImportance
 import com.example.memory.models.MemoryRecord
+import com.example.memory.models.MemorySource
 import com.example.security.Capability
 import java.util.Locale
 
 /**
  * Safely parses on-device Gemini Nano generated text into Summer's structured cognitive contracts:
- * [AIResult], [SummerIntent], [SummerResponse], [ActionRequest], and [MemoryRecord].
+ * [AIResult], [SummerIntent], [SummerResponse], [ActionRequest], and [MemoryRecord] / [MemoryOperation].
  *
  * Guarantees that:
  * 1. Malformed model text never causes exceptions.
  * 2. Actions proposed by the model are isolated inside [ActionRequest] for downstream security policy evaluation.
- * 3. Memory storage only occurs when the user explicitly requests to remember something.
+ * 3. Memory storage, updates, and forgetting only occur when the user explicitly requests them.
+ * 4. Normal conversational statements NEVER create permanent memory proposals.
  */
 class GeminiResponseParser {
 
@@ -40,7 +44,14 @@ class GeminiResponseParser {
 
         val intent = classifyIntent(userInput, normalizedInput, cleanText)
         val actionRequests = extractActionProposals(normalizedInput)
-        val memorySuggestions = extractMemoryProposals(userInput, normalizedInput)
+        val memoryOperations = extractMemoryOperations(userInput, normalizedInput)
+        val memorySuggestions = memoryOperations.mapNotNull {
+            when (it) {
+                is MemoryOperation.Store -> it.record
+                is MemoryOperation.Update -> it.record
+                else -> null
+            }
+        }
 
         val responseType = when {
             actionRequests.isNotEmpty() -> ResponseType.ACTION_PROPOSAL
@@ -53,6 +64,7 @@ class GeminiResponseParser {
             text = cleanText,
             type = responseType,
             suggestedActions = actionRequests,
+            memoryOperations = memoryOperations,
             confidence = 0.95f,
             source = modelName,
             timestamp = System.currentTimeMillis()
@@ -157,27 +169,140 @@ class GeminiResponseParser {
         return requests
     }
 
-    private fun extractMemoryProposals(rawInput: String, normalizedInput: String): List<MemoryRecord> {
-        val memories = mutableListOf<MemoryRecord>()
-        if (normalizedInput.startsWith("remember ") || normalizedInput.startsWith("remember:")) {
-            var fact = rawInput.substringAfter("remember ", "").trim()
-            if (fact.isBlank()) {
-                fact = rawInput.substringAfter("Remember ", "").trim()
+    fun extractMemoryOperations(rawInput: String, normalizedInput: String): List<MemoryOperation> {
+        val operations = mutableListOf<MemoryOperation>()
+
+        // 1. Explicit FORGET commands
+        if (normalizedInput.startsWith("forget ") || normalizedInput.startsWith("delete memory ") ||
+            normalizedInput.startsWith("forget that ") || normalizedInput.startsWith("forget what i told you about ")
+        ) {
+            val target = when {
+                normalizedInput.startsWith("forget what i told you about ") ->
+                    rawInput.substringAfter("forget what i told you about ", rawInput).trim()
+                normalizedInput.startsWith("forget that ") -> {
+                    val rawMatch = rawInput.substringAfter("forget that ", "").ifBlank {
+                        rawInput.substringAfter("Forget that ", "")
+                    }.trim()
+                    rawMatch.ifBlank { rawInput.substringAfter("forget that ", rawInput).trim() }
+                }
+                normalizedInput.startsWith("delete memory ") ->
+                    rawInput.substringAfter("delete memory ", rawInput).trim()
+                else -> {
+                    val rawMatch = rawInput.substringAfter("forget ", "").ifBlank {
+                        rawInput.substringAfter("Forget ", "")
+                    }.trim()
+                    rawMatch.ifBlank { rawInput.substringAfter("forget ", rawInput).trim() }
+                }
             }
+            if (target.isNotBlank()) {
+                operations.add(
+                    MemoryOperation.Forget(
+                        keywordOrContent = target,
+                        reason = "Explicit user forget instruction"
+                    )
+                )
+            }
+            return operations
+        }
+
+        // 2. Explicit UPDATE commands
+        if (normalizedInput.startsWith("actually, ") || normalizedInput.startsWith("update my ") ||
+            normalizedInput.startsWith("change my ")
+        ) {
+            var updatedFact = when {
+                normalizedInput.startsWith("actually, ") -> {
+                    val rawMatch = rawInput.substringAfter("actually, ", "").ifBlank {
+                        rawInput.substringAfter("Actually, ", "")
+                    }.trim()
+                    rawMatch.ifBlank { rawInput.substringAfter("actually, ", rawInput).trim() }
+                }
+                normalizedInput.startsWith("update my ") ->
+                    rawInput.substringAfter("update my ", rawInput).trim()
+                normalizedInput.startsWith("change my ") ->
+                    rawInput.substringAfter("change my ", rawInput).trim()
+                else -> ""
+            }
+            if (updatedFact.isNotBlank()) {
+                val record = MemoryRecord(
+                    category = MemoryCategory.USER_PREFERENCE,
+                    title = "Updated Preference",
+                    content = updatedFact,
+                    source = MemorySource.USER_UPDATE,
+                    importance = MemoryImportance.NORMAL,
+                    confidence = 1.0f
+                )
+                operations.add(
+                    MemoryOperation.Update(
+                        record = record,
+                        previousContent = updatedFact
+                    )
+                )
+            }
+            return operations
+        }
+
+        // 3. Explicit STORE commands
+        if (normalizedInput.startsWith("remember ") || normalizedInput.startsWith("remember:") ||
+            normalizedInput.startsWith("keep in mind ") || normalizedInput.startsWith("please remember ") ||
+            normalizedInput.startsWith("save this: ")
+        ) {
+            var fact = when {
+                normalizedInput.startsWith("remember ") -> {
+                    val rawMatch = rawInput.substringAfter("remember ", "").ifBlank {
+                        rawInput.substringAfter("Remember ", "")
+                    }.trim()
+                    rawMatch.ifBlank { rawInput.substringAfter("remember ", rawInput).trim() }
+                }
+                normalizedInput.startsWith("remember:") -> rawInput.substringAfter("remember:", rawInput).trim()
+                normalizedInput.startsWith("keep in mind ") -> rawInput.substringAfter("keep in mind ", rawInput).trim()
+                normalizedInput.startsWith("please remember ") -> rawInput.substringAfter("please remember ", rawInput).trim()
+                normalizedInput.startsWith("save this: ") -> rawInput.substringAfter("save this: ", rawInput).trim()
+                else -> ""
+            }
+
             if (fact.startsWith("that ", ignoreCase = true)) {
                 fact = fact.substring(5).trim()
             }
+
             if (fact.isNotBlank()) {
-                memories.add(
-                    MemoryRecord(
-                        category = MemoryCategory.USER_PREFERENCE,
-                        title = "Explicit Memory",
-                        content = fact,
-                        confidence = 1.0f
+                val category = determineCategory(fact)
+                operations.add(
+                    MemoryOperation.Store(
+                        MemoryRecord(
+                            category = category,
+                            title = "Explicit Memory",
+                            content = fact,
+                            source = MemorySource.EXPLICIT_USER,
+                            importance = MemoryImportance.NORMAL,
+                            confidence = 1.0f
+                        )
                     )
                 )
             }
         }
-        return memories
+
+        return operations
+    }
+
+    private fun determineCategory(content: String): MemoryCategory {
+        val lower = content.lowercase(Locale.ROOT)
+        return when {
+            lower.contains("prefer") || lower.contains("favorite") || lower.contains("favourite") || lower.contains("like ") ->
+                MemoryCategory.USER_PREFERENCE
+            lower.contains("goal") || lower.contains("aim") || lower.contains("planning to") ->
+                MemoryCategory.GOAL
+            lower.contains("project") || lower.contains("building") || lower.contains("working on") ->
+                MemoryCategory.PROJECT
+            lower.contains("always") || lower.contains("routine") || lower.contains("every day") ->
+                MemoryCategory.ROUTINE
+            lower.contains("rule") || lower.contains("instruction") ->
+                MemoryCategory.INSTRUCTION
+            lower.contains("friend") || lower.contains("family") || lower.contains("wife") || lower.contains("husband") || lower.contains("colleague") ->
+                MemoryCategory.RELATIONSHIP
+            lower.contains("my name is") || lower.contains("i live in") || lower.contains("i am a") || lower.contains("i'm a") ->
+                MemoryCategory.PERSONAL
+            else ->
+                MemoryCategory.FACT
+        }
     }
 }

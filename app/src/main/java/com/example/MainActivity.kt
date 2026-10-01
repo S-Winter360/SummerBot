@@ -63,6 +63,8 @@ fun SummerApp(
                     aiDiagnostics = aiDiagnostics,
                     onUpdateSettings = { viewModel.updateSettings(it) },
                     onRefreshAIDiagnostics = { viewModel.refreshAICapabilities() },
+                    onClearMemories = { viewModel.clearAllMemories() },
+                    onClearConversation = { viewModel.clearConversationHistory() },
                     onNavigateBack = { viewModel.navigateTo(CurrentScreen.MAIN) }
                 )
             }

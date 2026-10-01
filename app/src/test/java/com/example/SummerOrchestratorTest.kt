@@ -61,6 +61,45 @@ class SummerOrchestratorTest {
             memories.removeAll { it.id == id }
             _memoriesFlow.value = memories.toList()
         }
+
+        override suspend fun updateMemory(record: MemoryRecord) {
+            val index = memories.indexOfFirst { it.id == record.id }
+            if (index >= 0) {
+                memories[index] = record
+            } else {
+                memories.add(record)
+            }
+            _memoriesFlow.value = memories.toList()
+        }
+
+        override suspend fun getActiveMemories(): List<MemoryRecord> = memories.filter { it.isActive }
+
+        override suspend fun forgetMemory(targetId: String?, keyword: String?): Boolean {
+            if (targetId != null) {
+                val removed = memories.removeAll { it.id == targetId }
+                _memoriesFlow.value = memories.toList()
+                return removed
+            }
+            if (keyword != null) {
+                val removed = memories.removeAll { it.content.contains(keyword, ignoreCase = true) }
+                _memoriesFlow.value = memories.toList()
+                return removed
+            }
+            return false
+        }
+
+        override suspend fun clearAllMemories() {
+            memories.clear()
+            _memoriesFlow.value = emptyList()
+        }
+
+        override suspend fun updateAccessMetadata(id: String, count: Int, timestamp: Long) {
+            val index = memories.indexOfFirst { it.id == id }
+            if (index >= 0) {
+                memories[index] = memories[index].copy(accessCount = count, lastAccessedAt = timestamp)
+                _memoriesFlow.value = memories.toList()
+            }
+        }
     }
 
     private class FakeNetworkProvider : NetworkInformationProvider {
