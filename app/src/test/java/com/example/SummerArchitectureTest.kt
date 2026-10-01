@@ -1,12 +1,20 @@
 package com.example
 
 import com.example.actions.ActionRequest
+import com.example.core.event.EventPriority
+import com.example.core.event.SummerEvent
+import com.example.core.event.SummerEventBus
+import com.example.core.interaction.InteractionState
+import com.example.core.interaction.SummerInteraction
 import com.example.core.personality.SummerPersonality
+import com.example.core.session.SummerSessionManager
 import com.example.core.state.SummerState
 import com.example.core.state.SummerStateManager
 import com.example.security.Capability
 import com.example.security.DefaultActionAuthorizationPolicy
 import com.example.security.SecurityContext
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -15,7 +23,7 @@ import org.junit.Test
 class SummerArchitectureTest {
 
     @Test
-    fun testStateManagerTransitions() {
+    fun testStateManagerTransitionsAndHistory() {
         val manager = SummerStateManager()
         assertEquals(SummerState.Idle, manager.state.value)
         assertEquals("Idle", manager.state.value.displayName)
@@ -48,8 +56,40 @@ class SummerArchitectureTest {
         assertTrue(manager.state.value is SummerState.Error)
         assertEquals("Error", manager.state.value.displayName)
 
-        manager.transitionTo(SummerState.Idle)
+        manager.resetToIdle()
         assertEquals(SummerState.Idle, manager.state.value)
+        assertEquals(8, manager.transitionHistory.value.size)
+    }
+
+    @Test
+    fun testSessionManagerLifecycle() {
+        val sessionManager = SummerSessionManager()
+        val initialSession = sessionManager.getActiveSession()
+        assertEquals(0, initialSession.interactions.size)
+
+        val interaction = SummerInteraction(
+            sessionId = initialSession.id,
+            userInput = "Hello",
+            state = InteractionState.COMPLETED
+        )
+        sessionManager.recordInteraction(interaction)
+        assertEquals(1, sessionManager.getActiveSession().interactions.size)
+
+        val newSession = sessionManager.startNewSession()
+        assertTrue(newSession.id != initialSession.id)
+        assertEquals(1, sessionManager.getSessionHistory().size)
+    }
+
+    @Test
+    fun testEventBusPublishAndObserve() = runTest {
+        val bus = SummerEventBus()
+        val event = SummerEvent.UserTextInput(
+            text = "Testing bus",
+            priority = EventPriority.NORMAL
+        )
+        bus.publish(event)
+        val observed = bus.observe<SummerEvent.UserTextInput>().first()
+        assertEquals("Testing bus", observed.text)
     }
 
     @Test

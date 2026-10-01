@@ -1,6 +1,7 @@
 package com.example.ai.capability
 
 import com.example.ai.AIEngine
+import com.example.ai.OfflineLocalAIEngine
 import com.example.ai.models.AIModelInfo
 import com.example.ai.models.AIRequest
 import com.example.ai.models.AIResponse
@@ -9,87 +10,60 @@ import com.example.ai.models.RecognizedIntent
 import com.example.core.context.SummerContext
 import com.example.core.interaction.SummerInteraction
 import com.example.core.intent.SummerIntent
-import com.example.core.response.ResponseType
-import com.example.core.response.SummerResponse
 
+/**
+ * OnDeviceGenAIProvider delegates cognitive operations to [OnDeviceGeminiNanoAIEngine],
+ * maintaining backwards compatibility with Phase 0C-R1 contracts.
+ */
 class OnDeviceGenAIProvider(
     private val statusProvider: OnDeviceGenAIStatusProvider = AndroidOnDeviceGenAIStatusProvider(),
+    private val geminiClient: GeminiClient = AndroidMLKitGeminiClient(),
+    private val fallbackEngine: OfflineLocalAIEngine = OfflineLocalAIEngine(),
     initialStatus: AIAvailabilityStatus = AIAvailabilityStatus.CHECKING
 ) : AIEngine {
 
-    var metadata: AIModelMetadata = AIModelMetadata(
-        provider = AIProviderType.ON_DEVICE_GENAI,
-        modelIdentifier = "gemini-nano-prompt-api",
-        displayName = "Gemini Nano (ML Kit Prompt API)",
-        modelVersion = "1.0.0-beta4",
-        availabilityStatus = initialStatus,
-        supportedCapabilities = setOf(
-            AICapability.TEXT_GENERATION,
-            AICapability.CHAT,
-            AICapability.STRUCTURED_OUTPUT,
-            AICapability.SUMMARIZATION
-        ),
-        offlineCapable = true,
-        multimodalSupport = true
+    val geminiNanoEngine = OnDeviceGeminiNanoAIEngine(
+        client = geminiClient,
+        fallbackEngine = fallbackEngine,
+        initialStatus = initialStatus
     )
-        private set
+
+    val metadata: AIModelMetadata
+        get() = geminiNanoEngine.metadata
 
     override val modelInfo: AIModelInfo
-        get() = AIModelInfo(
-            name = metadata.displayName,
-            version = metadata.modelVersion ?: "unknown",
-            isLocalOffline = metadata.offlineCapable,
-            description = "On-device Gemini Nano via ML Kit GenAI Prompt API."
-        )
+        get() = geminiNanoEngine.modelInfo
 
     override val isReady: Boolean
-        get() = metadata.availabilityStatus == AIAvailabilityStatus.AVAILABLE
+        get() = geminiNanoEngine.isReady
 
     suspend fun checkAvailability(): AIAvailabilityStatus {
         val status = statusProvider.checkStatus()
-        updateAvailability(status)
+        geminiNanoEngine.updateAvailability(status)
         return status
     }
 
     fun updateAvailability(status: AIAvailabilityStatus) {
-        metadata = metadata.copy(
-            availabilityStatus = status,
-            lastCheckedTimestamp = System.currentTimeMillis()
-        )
+        geminiNanoEngine.updateAvailability(status)
+    }
+
+    suspend fun warmup() {
+        geminiNanoEngine.warmup()
     }
 
     override suspend fun classifyIntent(input: String): SummerIntent {
-        return SummerIntent.Unknown(input, confidence = 0.0f)
+        return geminiNanoEngine.classifyIntent(input)
     }
 
     override suspend fun process(context: SummerContext, interaction: SummerInteraction): AIResult {
-        val responseText = if (isReady) {
-            "On-device GenAI engine is detected as available. Inference execution is deferred to Phase 0D."
-        } else {
-            "On-device GenAI provider is currently ${metadata.availabilityStatus.label.lowercase()}. Routing to deterministic local reasoning."
-        }
-
-        return AIResult(
-            intent = SummerIntent.Unknown(interaction.userInput),
-            response = SummerResponse(
-                text = responseText,
-                type = if (isReady) ResponseType.INFORMATION else ResponseType.ERROR,
-                confidence = 0.0f,
-                source = metadata.displayName
-            ),
-            confidence = 0.0f
-        )
+        return geminiNanoEngine.process(context, interaction)
     }
 
     override suspend fun evaluateIntent(input: String): RecognizedIntent {
-        return RecognizedIntent.GeneralConversation(input)
+        return geminiNanoEngine.evaluateIntent(input)
     }
 
     override suspend fun processQuery(request: AIRequest): AIResponse {
-        return AIResponse(
-            text = "On-device GenAI query processing deferred to Phase 0D.",
-            modelUsed = metadata.displayName,
-            recognizedIntent = RecognizedIntent.GeneralConversation(request.query)
-        )
+        return geminiNanoEngine.processQuery(request)
     }
 }

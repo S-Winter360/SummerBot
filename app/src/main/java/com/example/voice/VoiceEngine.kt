@@ -5,8 +5,3 @@ interface VoiceEngine {
     suspend fun startListening(): Boolean
     suspend fun stopListening()
 }
-
-interface SpeakerRecognitionEngine {
-    val isEnrolled: Boolean
-    suspend fun verifySpeaker(audioSample: ByteArray): Boolean
-}

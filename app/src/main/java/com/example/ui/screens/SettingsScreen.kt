@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -102,9 +103,9 @@ fun SettingsScreen(
                 onClick = onNavigateBack,
                 modifier = Modifier
                     .size(48.dp)
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(CoreCharcoalSurface)
-                    .border(1.dp, CoreCharcoalBorder, RoundedCornerShape(12.dp))
+                    .clip(CircleShape)
+                    .background(CoreCharcoalSurface.copy(alpha = 0.65f))
+                    .border(1.dp, CoreCharcoalBorder.copy(alpha = 0.40f), CircleShape)
                     .testTag("settings_back_button")
             ) {
                 Icon(
@@ -422,8 +423,10 @@ private fun AIDiagnosticsCard(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(top = 4.dp)
-                    .testTag("refresh_ai_status_button"),
-                shape = RoundedCornerShape(10.dp),
+                    .testTag("refresh_ai_status_button")
+                    .testTag("refresh_diagnostics_button")
+                    .testTag("ai_refresh_button"),
+                shape = RoundedCornerShape(20.dp),
                 colors = ButtonDefaults.outlinedButtonColors(
                     contentColor = CyanLuminous
                 ),

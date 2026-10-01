@@ -29,6 +29,11 @@ class AIModelRegistry {
         providerType: AIProviderType,
         status: AIAvailabilityStatus
     ) {
+        val engine = synchronized(providers) { providers[providerType] }
+        when (engine) {
+            is OnDeviceGenAIProvider -> engine.updateAvailability(status)
+            is OnDeviceGeminiNanoAIEngine -> engine.updateAvailability(status)
+        }
         _metadataMap.update { current ->
             val existing = current[providerType]
             if (existing != null) {

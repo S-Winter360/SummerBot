@@ -3,16 +3,16 @@ package com.example.ui.components
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -28,10 +28,13 @@ import com.example.ui.theme.CoreCharcoalBorder
 import com.example.ui.theme.CoreCharcoalElevated
 import com.example.ui.theme.CyanLuminous
 import com.example.ui.theme.SlateLight
-import com.example.ui.theme.SlateMuted
 import com.example.ui.theme.StateErrorRose
 import com.example.ui.theme.StateIdleCyan
 
+/**
+ * Understated, organic capability verification pill.
+ * Informs the user of system capability events without technical dashboard clutter.
+ */
 @Composable
 fun CapabilityAuditTicker(
     latestAudit: ActionAuditEntry?,
@@ -39,72 +42,34 @@ fun CapabilityAuditTicker(
 ) {
     AnimatedVisibility(
         visible = latestAudit != null,
-        enter = fadeIn(),
-        exit = fadeOut(),
+        enter = fadeIn() + slideInVertically(initialOffsetY = { it / 2 }),
+        exit = fadeOut() + slideOutVertically(targetOffsetY = { it / 2 }),
         modifier = modifier
     ) {
         if (latestAudit != null) {
-            val shape = RoundedCornerShape(12.dp)
+            val pillShape = RoundedCornerShape(20.dp)
             val statusColor = if (latestAudit.isAuthorized) StateIdleCyan else StateErrorRose
 
-            Column(
+            Row(
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(shape)
-                    .background(CoreCharcoalElevated.copy(alpha = 0.7f))
-                    .border(1.dp, CoreCharcoalBorder.copy(alpha = 0.5f), shape)
-                    .padding(12.dp)
+                    .clip(pillShape)
+                    .background(CoreCharcoalElevated.copy(alpha = 0.70f))
+                    .border(1.dp, CoreCharcoalBorder.copy(alpha = 0.40f), pillShape)
+                    .padding(horizontal = 14.dp, vertical = 6.dp)
                     .testTag("capability_audit_ticker"),
-                verticalArrangement = Arrangement.spacedBy(4.dp)
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Shield,
-                            contentDescription = "Capability Guard",
-                            tint = CyanLuminous,
-                            modifier = Modifier.padding(end = 2.dp)
-                        )
-                        Text(
-                            text = "SECURITY GATEWAY AUDIT",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = SlateLight
-                        )
-                    }
-
-                    Text(
-                        text = latestAudit.formattedTime,
-                        style = MaterialTheme.typography.labelSmall,
-                        color = SlateMuted
-                    )
-                }
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Text(
-                        text = latestAudit.actionName,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onBackground
-                    )
-                    Text(
-                        text = if (latestAudit.isAuthorized) "AUTHORIZED" else "DENIED",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = statusColor
-                    )
-                }
+                Icon(
+                    imageVector = Icons.Default.Shield,
+                    contentDescription = "Capability Guard",
+                    tint = statusColor,
+                    modifier = Modifier.size(14.dp)
+                )
 
                 Text(
-                    text = "Pipeline: AI Decision → Request [${latestAudit.capabilityName}] → Policy Check [${latestAudit.authorizationSummary}] → ${latestAudit.outcomeSummary}",
-                    style = MaterialTheme.typography.bodySmall,
+                    text = "${latestAudit.actionName} · ${if (latestAudit.isAuthorized) "Permitted" else "Restricted"}",
+                    style = MaterialTheme.typography.labelSmall,
                     color = SlateLight
                 )
             }

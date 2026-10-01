@@ -9,6 +9,7 @@ import com.example.core.event.SummerEventBus
 import com.example.core.interaction.InteractionState
 import com.example.core.orchestrator.SummerOrchestrator
 import com.example.core.personality.SummerPersonality
+import com.example.core.response.ResponseType
 import com.example.core.session.SummerSessionManager
 import com.example.core.state.SummerState
 import com.example.core.state.SummerStateManager
@@ -139,10 +140,20 @@ class SummerOrchestratorTest {
     }
 
     @Test
-    fun testCapabilityActionExecution() = runTest {
+    fun testCapabilityActionExecutionNetwork() = runTest {
         val (orchestrator, _) = createOrchestrator()
 
         val result = orchestrator.handleUserInput("test network")
+        assertEquals(InteractionState.COMPLETED, result.state)
+        assertNotNull(result.response)
+        assertTrue(result.response!!.text.contains("Execution outcome"))
+    }
+
+    @Test
+    fun testCapabilityActionExecutionMic() = runTest {
+        val (orchestrator, _) = createOrchestrator()
+
+        val result = orchestrator.handleUserInput("test mic")
         assertEquals(InteractionState.COMPLETED, result.state)
         assertNotNull(result.response)
         assertTrue(result.response!!.text.contains("Execution outcome"))
@@ -155,5 +166,16 @@ class SummerOrchestratorTest {
         val result = orchestrator.handleUserInput("remember I like dark mode")
         assertEquals(InteractionState.COMPLETED, result.state)
         assertTrue(memoryRepo.memories.any { it.content.contains("I like dark mode") })
+    }
+
+    @Test
+    fun testUnknownQueryFallback() = runTest {
+        val (orchestrator, _) = createOrchestrator()
+
+        val result = orchestrator.handleUserInput("xyzzy gibberish query 12345")
+        assertEquals(InteractionState.COMPLETED, result.state)
+        assertNotNull(result.response)
+        assertEquals(ResponseType.TEXT, result.response!!.type)
+        assertTrue(result.response!!.text.isNotBlank())
     }
 }

@@ -3,16 +3,6 @@ package com.example.core.interaction
 import com.example.core.response.SummerResponse
 import com.example.memory.models.MemoryRecord
 
-enum class InteractionState {
-    RECEIVED,
-    UNDERSTANDING,
-    REASONING,
-    RESPONDING,
-    EXECUTING,
-    COMPLETED,
-    FAILED
-}
-
 data class SummerInteraction(
     val id: String = java.util.UUID.randomUUID().toString(),
     val sessionId: String,

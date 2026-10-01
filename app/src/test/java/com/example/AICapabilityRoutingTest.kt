@@ -347,4 +347,38 @@ class AICapabilityRoutingTest {
         val capResult = router.process(context, capInteraction)
         assertTrue(capResult.response.text.contains("architecture is being prepared"))
     }
+
+    // 13. Router strictly falls back on every non-AVAILABLE status
+    @Test
+    fun testRouterFallsBackOnAllNonAvailableStates() = runTest {
+        val nonAvailableStatuses = listOf(
+            AIAvailabilityStatus.CHECKING,
+            AIAvailabilityStatus.DOWNLOADABLE,
+            AIAvailabilityStatus.DOWNLOADING,
+            AIAvailabilityStatus.UNAVAILABLE,
+            AIAvailabilityStatus.NOT_SUPPORTED,
+            AIAvailabilityStatus.ERROR
+        )
+
+        for (status in nonAvailableStatuses) {
+            val registry = AIModelRegistry()
+            val fallback = OfflineLocalAIEngine()
+            val onDevice = OnDeviceGenAIProvider(initialStatus = status)
+
+            registry.register(
+                AIProviderType.ON_DEVICE_GENAI,
+                onDevice,
+                onDevice.metadata.copy(availabilityStatus = status)
+            )
+
+            val router = AIModelRouter(
+                registry = registry,
+                fallbackEngine = fallback
+            )
+
+            val (routedType, routedEngine) = router.route(AICapability.TEXT_GENERATION)
+            assertEquals("Status $status must route to DETERMINISTIC_LOCAL", AIProviderType.DETERMINISTIC_LOCAL, routedType)
+            assertEquals(fallback, routedEngine)
+        }
+    }
 }

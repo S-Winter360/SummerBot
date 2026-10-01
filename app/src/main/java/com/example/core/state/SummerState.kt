@@ -1,9 +1,5 @@
 package com.example.core.state
 
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
-
 sealed interface SummerState {
     val description: String
     val displayName: String
@@ -48,14 +44,5 @@ sealed interface SummerState {
 
     data class Error(val cause: String) : SummerState {
         override val description: String = "Safeguard fault intercepted: $cause."
-    }
-}
-
-class SummerStateManager(initialState: SummerState = SummerState.Idle) {
-    private val _state = MutableStateFlow(initialState)
-    val state: StateFlow<SummerState> = _state.asStateFlow()
-
-    fun transitionTo(newState: SummerState, cause: String = "") {
-        _state.value = newState
     }
 }
