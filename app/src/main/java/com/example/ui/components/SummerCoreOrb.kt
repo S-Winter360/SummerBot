@@ -75,6 +75,7 @@ fun SummerCoreOrb(
         is SummerState.Thinking -> Pair(CyanBright, WarningAmber)
         is SummerState.Speaking -> Pair(CyanLuminous, CyanBright)
         is SummerState.Executing -> Pair(SuccessGreen, CyanMuted)
+        is SummerState.Observing -> Pair(SuccessGreen, CyanLuminous)
         is SummerState.Learning -> Pair(CyanBright, SuccessGreen)
         is SummerState.Error -> Pair(ErrorRed, WarningAmber)
     }

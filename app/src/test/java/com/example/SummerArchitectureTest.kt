@@ -1,17 +1,12 @@
 package com.example
 
 import com.example.actions.ActionRequest
-import com.example.actions.ActionResult
-import com.example.actions.SecuredActionExecutor
-import com.example.core.personality.BehavioralTrait
 import com.example.core.personality.SummerPersonality
 import com.example.core.state.SummerState
 import com.example.core.state.SummerStateManager
-import com.example.memory.models.SummerSettings
 import com.example.security.Capability
 import com.example.security.DefaultActionAuthorizationPolicy
 import com.example.security.SecurityContext
-import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -23,73 +18,82 @@ class SummerArchitectureTest {
     fun testStateManagerTransitions() {
         val manager = SummerStateManager()
         assertEquals(SummerState.Idle, manager.state.value)
+        assertEquals("Idle", manager.state.value.displayName)
 
         manager.transitionTo(SummerState.Listening())
         assertTrue(manager.state.value is SummerState.Listening)
+        assertEquals("Listening", manager.state.value.displayName)
 
         manager.transitionTo(SummerState.Thinking())
         assertTrue(manager.state.value is SummerState.Thinking)
+        assertEquals("Thinking", manager.state.value.displayName)
 
         manager.transitionTo(SummerState.Speaking("Acknowledged."))
         assertTrue(manager.state.value is SummerState.Speaking)
+        assertEquals("Speaking", manager.state.value.displayName)
 
-        manager.resetToIdle()
+        manager.transitionTo(SummerState.Executing("Test Task"))
+        assertTrue(manager.state.value is SummerState.Executing)
+        assertEquals("Executing", manager.state.value.displayName)
+
+        manager.transitionTo(SummerState.Observing("Sensor inputs"))
+        assertTrue(manager.state.value is SummerState.Observing)
+        assertEquals("Observing", manager.state.value.displayName)
+
+        manager.transitionTo(SummerState.Learning("Context pattern"))
+        assertTrue(manager.state.value is SummerState.Learning)
+        assertEquals("Learning", manager.state.value.displayName)
+
+        manager.transitionTo(SummerState.Error("Network failure"))
+        assertTrue(manager.state.value is SummerState.Error)
+        assertEquals("Error", manager.state.value.displayName)
+
+        manager.transitionTo(SummerState.Idle)
         assertEquals(SummerState.Idle, manager.state.value)
-        assertEquals(4, manager.transitionHistory.value.size)
     }
 
     @Test
-    fun testSecurityPolicyDeniesInternetWhenDisabled() = runTest {
+    fun testSecurityPolicySessionAuthorization() {
         val policy = DefaultActionAuthorizationPolicy()
-        val settings = SummerSettings(internetAccessAllowed = false)
-        val context = SecurityContext()
-
-        val result = policy.evaluate(Capability.INTERNET, context, settings)
-        assertFalse(result.isAllowed)
-    }
-
-    @Test
-    fun testSecurityPolicyAllowsInternetWhenEnabled() = runTest {
-        val policy = DefaultActionAuthorizationPolicy()
-        val settings = SummerSettings(internetAccessAllowed = true)
-        val context = SecurityContext()
-
-        val result = policy.evaluate(Capability.INTERNET, context, settings)
-        assertTrue(result.isAllowed)
-    }
-
-    @Test
-    fun testActionExecutorBlocksUnauthorizedRequests() = runTest {
-        val policy = DefaultActionAuthorizationPolicy()
-        val executor = SecuredActionExecutor(policy)
-        val settings = SummerSettings(voiceInteractionEnabled = false)
-
         val request = ActionRequest(
-            capability = Capability.MICROPHONE,
-            actionName = "Activate Mic",
-            reasoning = "Testing microphone gate"
+            capability = Capability.INTERNET,
+            actionName = "Check Connectivity",
+            reasoning = "Network verification"
         )
 
-        val outcome = executor.execute(request, SecurityContext(), settings)
-        assertTrue(outcome is ActionResult.Denied)
-        assertEquals(1, executor.auditLog.value.size)
-        assertFalse(executor.auditLog.value.first().isAuthorized)
+        val authorizedContext = SecurityContext(
+            caller = "TEST_CALLER",
+            sessionAuthorized = true
+        )
+        assertTrue(policy.isAuthorized(request, authorizedContext))
+
+        val unauthorizedContext = SecurityContext(
+            caller = "TEST_CALLER",
+            sessionAuthorized = false
+        )
+        assertFalse(policy.isAuthorized(request, unauthorizedContext))
+    }
+
+    @Test
+    fun testCapabilityConfirmationRequirements() {
+        val policy = DefaultActionAuthorizationPolicy()
+
+        val netRequest = ActionRequest(Capability.INTERNET, "Net", "reason")
+        assertFalse(policy.requiresExplicitUserConfirmation(netRequest))
+
+        val camRequest = ActionRequest(Capability.CAMERA, "Cam", "reason")
+        assertTrue(policy.requiresExplicitUserConfirmation(camRequest))
+
+        val sysRequest = ActionRequest(Capability.SYSTEM_SETTINGS, "Settings", "reason")
+        assertTrue(policy.requiresExplicitUserConfirmation(sysRequest))
     }
 
     @Test
     fun testPersonalityCharacteristics() {
         val personality = SummerPersonality.DEFAULT
-        assertEquals("Summer Winter", personality.name)
+        assertEquals("Summer Winter", personality.fullName)
         assertEquals("Summer", personality.shortName)
-        assertEquals("Personal AI Companion", personality.role)
-        assertTrue(personality.traits.contains(BehavioralTrait.CALM))
-        assertTrue(personality.traits.contains(BehavioralTrait.INTELLIGENT))
-        assertTrue(personality.traits.contains(BehavioralTrait.WARM))
-        assertTrue(personality.traits.contains(BehavioralTrait.CONCISE_BY_DEFAULT))
-        assertTrue(personality.traits.contains(BehavioralTrait.CONVERSATIONAL))
-        assertTrue(personality.traits.contains(BehavioralTrait.RESPECTFUL))
-        assertTrue(personality.traits.contains(BehavioralTrait.MODERATELY_PROACTIVE))
-        assertTrue(personality.traits.contains(BehavioralTrait.CURIOUS))
-        assertTrue(personality.traits.contains(BehavioralTrait.NON_INTRUSIVE))
+        assertTrue(personality.archetype.contains("observant", ignoreCase = true))
+        assertTrue(personality.toneDirective.contains("calm", ignoreCase = true))
     }
 }

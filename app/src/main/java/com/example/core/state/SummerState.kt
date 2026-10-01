@@ -6,13 +6,24 @@ import kotlinx.coroutines.flow.asStateFlow
 
 sealed interface SummerState {
     val description: String
+    val displayName: String
+        get() = when (this) {
+            is Idle -> "Idle"
+            is Listening -> "Listening"
+            is Thinking -> "Thinking"
+            is Speaking -> "Speaking"
+            is Executing -> "Executing"
+            is Observing -> "Observing"
+            is Learning -> "Learning"
+            is Error -> "Error"
+        }
 
     data object Idle : SummerState {
         override val description: String = "Observant, quiescent, and ready."
     }
 
-    data object Listening : SummerState {
-        override val description: String = "Awaiting speech or sensor input."
+    data class Listening(val inputPreview: String = "Awaiting speech or sensor input.") : SummerState {
+        override val description: String = inputPreview
     }
 
     data class Thinking(val intent: String? = null) : SummerState {
@@ -27,8 +38,12 @@ sealed interface SummerState {
         override val description: String = "Authorizing and performing system action: $actionName."
     }
 
+    data class Observing(val focus: String = "Ambient context") : SummerState {
+        override val description: String = "Monitoring environmental and contextual inputs: $focus."
+    }
+
     data class Learning(val topic: String) : SummerState {
-        override val description: String = "Consolidating observation into local memory."
+        override val description: String = "Consolidating observation into local memory: $topic."
     }
 
     data class Error(val cause: String) : SummerState {

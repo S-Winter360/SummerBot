@@ -53,6 +53,8 @@ import com.example.core.interaction.SummerInteraction
 import com.example.core.personality.SummerPersonality
 import com.example.core.state.SummerState
 import com.example.network.NetworkState
+import com.example.ui.components.CapabilityAuditTicker
+import com.example.ui.components.StateIndicatorBadge
 import com.example.ui.components.SummerCoreOrb
 import com.example.ui.theme.CoreBlack
 import com.example.ui.theme.CoreCharcoalBorder
@@ -170,14 +172,8 @@ fun MainSummerScreen(
 
         Spacer(modifier = Modifier.height(12.dp))
 
-        // State indicator label
-        Text(
-            text = state::class.java.simpleName.uppercase(),
-            style = MaterialTheme.typography.labelMedium,
-            fontWeight = FontWeight.Bold,
-            color = CyanLuminous,
-            modifier = Modifier.testTag("state_label")
-        )
+        // State indicator badge
+        StateIndicatorBadge(state = state)
 
         Text(
             text = state.description,
@@ -226,6 +222,12 @@ fun MainSummerScreen(
                 )
             }
         }
+
+        // Capability Security Audit Ticker
+        CapabilityAuditTicker(
+            latestAudit = latestAudit,
+            modifier = Modifier.padding(vertical = 4.dp)
+        )
 
         // Quick demo intents
         Row(
