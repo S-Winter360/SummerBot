@@ -1,5 +1,5 @@
 {
-  "name": "Summer",
+  "name": "Summer Winter",
   "description": "On-device AI companion and assistant architecture",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]

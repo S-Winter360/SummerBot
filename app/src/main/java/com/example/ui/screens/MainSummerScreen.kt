@@ -13,6 +13,7 @@ import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -50,12 +51,15 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
+import com.example.R
 import com.example.actions.ActionAuditEntry
 import com.example.core.interaction.SummerInteraction
 import com.example.core.personality.SummerPersonality
@@ -158,33 +162,57 @@ fun MainSummerScreen(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                Text(
-                    text = personality.shortName,
-                    style = MaterialTheme.typography.titleLarge.copy(
-                        fontWeight = FontWeight.Normal,
-                        letterSpacing = 0.8.sp
-                    ),
-                    color = SlateBright
-                )
-
-                // Understated, organic live connectivity indicator
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                // Bespoke Summer Winter Logo Emblem
+                Box(
+                    modifier = Modifier
+                        .size(44.dp)
+                        .clip(CircleShape)
+                        .background(CoreCharcoalElevated)
+                        .border(1.5.dp, CyanLuminous.copy(alpha = 0.5f), CircleShape),
+                    contentAlignment = Alignment.Center
                 ) {
-                    Box(
+                    Image(
+                        painter = painterResource(id = R.drawable.ic_summer_winter_logo),
+                        contentDescription = "Summer Winter Logo Emblem",
                         modifier = Modifier
-                            .size(6.dp)
-                            .scale(networkDotPulse)
-                            .clip(CircleShape)
-                            .background(if (isOnline) SuccessGreen else SlateMuted)
+                            .size(40.dp)
+                            .clip(CircleShape),
+                        contentScale = ContentScale.Crop
                     )
+                }
+
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                     Text(
-                        text = if (isOnline) "Online" else "Offline",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = if (isOnline) SlateLight else SlateMuted
+                        text = "Summer Winter",
+                        style = MaterialTheme.typography.titleMedium.copy(
+                            fontWeight = FontWeight.SemiBold,
+                            letterSpacing = 0.6.sp
+                        ),
+                        color = SlateBright
                     )
+
+                    // Understated, organic live connectivity indicator
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(6.dp)
+                                .scale(networkDotPulse)
+                                .clip(CircleShape)
+                                .background(if (isOnline) SuccessGreen else SlateMuted)
+                        )
+                        Text(
+                            text = if (isOnline) "Cognitive systems active" else "Offline Local Mode",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = if (isOnline) SlateLight else SlateMuted
+                        )
+                    }
                 }
             }
 

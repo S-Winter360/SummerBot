@@ -3,6 +3,6 @@
     <item
         android:width="66dp"
         android:height="66dp"
-        android:drawable="@drawable/ic_summer_icon"
+        android:drawable="@drawable/ic_summer_winter_logo"
         android:gravity="center" />
 </layer-list>
