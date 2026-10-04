@@ -62,6 +62,7 @@ import com.example.ui.theme.CoreCharcoalSurface
 import com.example.ui.theme.CyanBright
 import com.example.ui.theme.CyanLuminous
 import com.example.ui.theme.SlateBright
+import com.example.voice.models.VoiceProfileId
 import com.example.ui.theme.SlateLight
 import com.example.ui.theme.SlateMuted
 import java.text.SimpleDateFormat
@@ -76,6 +77,9 @@ fun SettingsScreen(
     onRefreshAIDiagnostics: () -> Unit = {},
     onClearMemories: () -> Unit = {},
     onClearConversation: () -> Unit = {},
+    onSelectVoiceProfile: (VoiceProfileId) -> Unit = {},
+    onSetSpeechSpeed: (Float) -> Unit = {},
+    onPreviewVoice: () -> Unit = {},
     onNavigateBack: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -171,6 +175,20 @@ fun SettingsScreen(
             tag = "toggle_voice_interaction"
         )
 
+        // Phase 0F: Voice Architecture & Natural Speech Settings Card
+        if (settings.voiceInteractionEnabled) {
+            VoiceSettingsCard(
+                settings = settings,
+                diagnostics = aiDiagnostics,
+                onSelectVoiceProfile = onSelectVoiceProfile,
+                onSetSpeechSpeed = onSetSpeechSpeed,
+                onPreviewVoice = onPreviewVoice
+            )
+
+            // Phase 0H: Speech Recognition & Foreground Listening Diagnostics
+            SpeechInputDiagnosticsCard(diagnostics = aiDiagnostics)
+        }
+
         SettingsToggleCard(
             title = "Wake Word",
             subtitle = "Local wake-word detection placeholder (deferred to wake-word phase)",
@@ -214,6 +232,9 @@ fun SettingsScreen(
             onCheckedChange = { onUpdateSettings(settings.copy(cameraAccessAllowed = it)) },
             tag = "toggle_camera_access"
         )
+
+        // Phase 0G: Minimal Vision & Camera Architecture Diagnostics
+        VisionDiagnosticsCard(diagnostics = aiDiagnostics)
 
         SettingsToggleCard(
             title = "Internet Access",
@@ -659,3 +680,410 @@ private fun MemoryDiagnosticsCard(
         }
     }
 }
+
+@Composable
+private fun VoiceSettingsCard(
+    settings: SummerSettings,
+    diagnostics: AIDiagnostics,
+    onSelectVoiceProfile: (VoiceProfileId) -> Unit,
+    onSetSpeechSpeed: (Float) -> Unit,
+    onPreviewVoice: () -> Unit
+) {
+    val isMale = settings.voiceProfileId.equals("MALE", ignoreCase = true)
+
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag("voice_settings_card"),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = CoreCharcoalSurface.copy(alpha = 0.9f)
+        ),
+        border = androidx.compose.foundation.BorderStroke(1.dp, CoreCharcoalBorder.copy(alpha = 0.8f))
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(36.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(CoreCharcoalElevated),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.RecordVoiceOver,
+                            contentDescription = null,
+                            tint = CyanLuminous,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+                    Column {
+                        Text(
+                            text = "Voice Profile",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.SemiBold,
+                            color = SlateBright
+                        )
+                        Text(
+                            text = "Conversational AI Speech",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = SlateMuted
+                        )
+                    }
+                }
+
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(CyanLuminous.copy(alpha = 0.2f))
+                        .padding(horizontal = 8.dp, vertical = 4.dp)
+                ) {
+                    Text(
+                        text = if (isMale) "MALE" else "FEMALE",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = CyanBright,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
+
+            Text(
+                text = "VOICE IDENTITY",
+                style = MaterialTheme.typography.labelSmall,
+                color = CyanLuminous
+            )
+
+            // Two first-class voice profiles
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                OutlinedButton(
+                    onClick = { onSelectVoiceProfile(VoiceProfileId.FEMALE) },
+                    modifier = Modifier
+                        .weight(1f)
+                        .testTag("voice_profile_female_button"),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.outlinedButtonColors(
+                        containerColor = if (!isMale) CyanLuminous.copy(alpha = 0.15f) else CoreCharcoalElevated,
+                        contentColor = if (!isMale) CyanBright else SlateLight
+                    ),
+                    border = androidx.compose.foundation.BorderStroke(
+                        1.dp,
+                        if (!isMale) CyanLuminous else CoreCharcoalBorder
+                    )
+                ) {
+                    Text("Summer Female", style = MaterialTheme.typography.labelMedium)
+                }
+
+                OutlinedButton(
+                    onClick = { onSelectVoiceProfile(VoiceProfileId.MALE) },
+                    modifier = Modifier
+                        .weight(1f)
+                        .testTag("voice_profile_male_button"),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.outlinedButtonColors(
+                        containerColor = if (isMale) CyanLuminous.copy(alpha = 0.15f) else CoreCharcoalElevated,
+                        contentColor = if (isMale) CyanBright else SlateLight
+                    ),
+                    border = androidx.compose.foundation.BorderStroke(
+                        1.dp,
+                        if (isMale) CyanLuminous else CoreCharcoalBorder
+                    )
+                ) {
+                    Text("Summer Male", style = MaterialTheme.typography.labelMedium)
+                }
+            }
+
+            Text(
+                text = "SPEECH SPEED",
+                style = MaterialTheme.typography.labelSmall,
+                color = CyanLuminous
+            )
+
+            // Speed selector: Slow (0.8x), Normal (1.0x), Fast (1.25x)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                val currentSpeed = settings.speechSpeed
+                val speeds = listOf(Pair("Slow", 0.8f), Pair("Normal", 1.0f), Pair("Fast", 1.25f))
+
+                for ((label, speedVal) in speeds) {
+                    val isSelected = (Math.abs(currentSpeed - speedVal) < 0.1f)
+                    OutlinedButton(
+                        onClick = { onSetSpeechSpeed(speedVal) },
+                        modifier = Modifier
+                            .weight(1f)
+                            .testTag("speed_${label.lowercase()}_button"),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = ButtonDefaults.outlinedButtonColors(
+                            containerColor = if (isSelected) CyanLuminous.copy(alpha = 0.15f) else CoreCharcoalElevated,
+                            contentColor = if (isSelected) CyanBright else SlateLight
+                        ),
+                        border = androidx.compose.foundation.BorderStroke(
+                            1.dp,
+                            if (isSelected) CyanLuminous else CoreCharcoalBorder
+                        )
+                    ) {
+                        Text(label, style = MaterialTheme.typography.labelSmall)
+                    }
+                }
+            }
+
+            DiagnosticRow(
+                label = "Active Provider",
+                value = diagnostics.voiceDiagnostics.activeProvider.displayName
+            )
+            DiagnosticRow(
+                label = "Resolved Voice",
+                value = diagnostics.voiceDiagnostics.resolvedEngineVoice ?: "Default System Voice"
+            )
+            DiagnosticRow(
+                label = "Offline Capable",
+                value = if (diagnostics.voiceDiagnostics.isOfflineCapable) "Yes (100% On-Device)" else "No"
+            )
+
+            OutlinedButton(
+                onClick = onPreviewVoice,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 4.dp)
+                    .testTag("preview_voice_button"),
+                shape = RoundedCornerShape(16.dp),
+                colors = ButtonDefaults.outlinedButtonColors(contentColor = CyanLuminous),
+                border = androidx.compose.foundation.BorderStroke(1.dp, CyanLuminous.copy(alpha = 0.5f))
+            ) {
+                Icon(
+                    imageVector = Icons.Default.RecordVoiceOver,
+                    contentDescription = null,
+                    modifier = Modifier.size(16.dp)
+                )
+                Spacer(modifier = Modifier.size(8.dp))
+                Text("Preview Voice Output", style = MaterialTheme.typography.labelMedium)
+            }
+        }
+    }
+}
+
+@Composable
+private fun VisionDiagnosticsCard(
+    diagnostics: AIDiagnostics
+) {
+    val vision = diagnostics.visionDiagnostics
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag("vision_diagnostics_card"),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = CoreCharcoalSurface.copy(alpha = 0.85f)
+        ),
+        border = androidx.compose.foundation.BorderStroke(1.dp, CoreCharcoalBorder.copy(alpha = 0.6f))
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(36.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(CoreCharcoalElevated),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.CameraAlt,
+                            contentDescription = null,
+                            tint = CyanLuminous,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+
+                    Column {
+                        Text(
+                            text = "Vision & Camera Diagnostics",
+                            style = MaterialTheme.typography.titleSmall,
+                            color = MaterialTheme.colorScheme.onBackground,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        Text(
+                            text = "Architectural Foundation",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = SlateLight
+                        )
+                    }
+                }
+
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(6.dp))
+                        .background(CoreCharcoalElevated)
+                        .padding(horizontal = 8.dp, vertical = 3.dp)
+                ) {
+                    Text(
+                        text = "FOUNDATION",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = CyanBright,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(2.dp))
+
+            DiagnosticRow(
+                label = "Camera Hardware",
+                value = if (vision.cameraHardwareAvailable) "Available" else "Unavailable"
+            )
+            DiagnosticRow(
+                label = "Camera Permission",
+                value = when (vision.cameraPermissionState) {
+                    com.example.vision.CameraPermissionState.GRANTED -> "Granted"
+                    com.example.vision.CameraPermissionState.DENIED -> "Not granted"
+                    com.example.vision.CameraPermissionState.PERMANENTLY_DENIED -> "Permanently denied"
+                    com.example.vision.CameraPermissionState.UNKNOWN -> "Unknown"
+                }
+            )
+            DiagnosticRow(
+                label = "Vision Engine",
+                value = when (vision.activeProviderType) {
+                    com.example.vision.VisionProviderType.STUB -> "Stub"
+                    com.example.vision.VisionProviderType.ANDROID_CAMERA -> "Android Camera"
+                    com.example.vision.VisionProviderType.LOCAL_VISION -> "Local Vision"
+                    com.example.vision.VisionProviderType.ON_DEVICE_GENAI -> "On-Device GenAI"
+                    com.example.vision.VisionProviderType.OPTIONAL_ONLINE -> "Optional Online"
+                }
+            )
+            DiagnosticRow(
+                label = "Live Vision",
+                value = "Not implemented"
+            )
+        }
+    }
+}
+
+@Composable
+private fun SpeechInputDiagnosticsCard(
+    diagnostics: AIDiagnostics
+) {
+    val speech = diagnostics.speechDiagnostics
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag("speech_input_diagnostics_card"),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = CoreCharcoalSurface.copy(alpha = 0.85f)
+        ),
+        border = androidx.compose.foundation.BorderStroke(1.dp, CoreCharcoalBorder.copy(alpha = 0.6f))
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(36.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(CoreCharcoalElevated),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Mic,
+                            contentDescription = null,
+                            tint = CyanLuminous,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+
+                    Column {
+                        Text(
+                            text = "Speech Input",
+                            style = MaterialTheme.typography.titleSmall,
+                            color = MaterialTheme.colorScheme.onBackground,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        Text(
+                            text = "Foreground Speech Recognition",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = SlateLight
+                        )
+                    }
+                }
+
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(6.dp))
+                        .background(CoreCharcoalElevated)
+                        .padding(horizontal = 8.dp, vertical = 3.dp)
+                ) {
+                    Text(
+                        text = if (speech.isAvailable) "READY" else "UNAVAILABLE",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = if (speech.isAvailable) CyanBright else SlateMuted,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(2.dp))
+
+            DiagnosticRow(
+                label = "Recognizer",
+                value = speech.recognizerName
+            )
+            DiagnosticRow(
+                label = "Availability",
+                value = if (speech.isAvailable) "Available" else "Unavailable"
+            )
+            DiagnosticRow(
+                label = "Microphone Permission",
+                value = if (speech.microphonePermissionGranted) "Granted" else "Not granted"
+            )
+            DiagnosticRow(
+                label = "Locale",
+                value = speech.locale
+            )
+            DiagnosticRow(
+                label = "Offline Capability",
+                value = speech.offlineCapability.label
+            )
+            DiagnosticRow(
+                label = "State",
+                value = speech.state.name
+            )
+        }
+    }
+}
+
+

@@ -39,6 +39,8 @@ fun SummerApp(
     val speech by viewModel.recentAssistantSpeech.collectAsStateWithLifecycle()
     val currentInteraction by viewModel.currentInteraction.collectAsStateWithLifecycle()
     val aiDiagnostics by viewModel.aiDiagnostics.collectAsStateWithLifecycle()
+    val speechState by viewModel.speechRecognitionState.collectAsStateWithLifecycle()
+    val partialTranscript by viewModel.partialSpeechTranscript.collectAsStateWithLifecycle()
 
     Crossfade(targetState = currentScreen, label = "screen_crossfade") { screen ->
         when (screen) {
@@ -53,7 +55,9 @@ fun SummerApp(
                     onStateSelected = { viewModel.selectStateDemo(it) },
                     onSubmitQuery = { viewModel.submitQuery(it) },
                     onMicTrigger = { viewModel.triggerVoiceInteraction() },
-                    onNavigateToSettings = { viewModel.navigateTo(CurrentScreen.SETTINGS) }
+                    onNavigateToSettings = { viewModel.navigateTo(CurrentScreen.SETTINGS) },
+                    speechState = speechState,
+                    partialSpeechTranscript = partialTranscript
                 )
             }
 
@@ -65,6 +69,9 @@ fun SummerApp(
                     onRefreshAIDiagnostics = { viewModel.refreshAICapabilities() },
                     onClearMemories = { viewModel.clearAllMemories() },
                     onClearConversation = { viewModel.clearConversationHistory() },
+                    onSelectVoiceProfile = { viewModel.selectVoiceProfile(it) },
+                    onSetSpeechSpeed = { viewModel.setSpeechSpeed(it) },
+                    onPreviewVoice = { viewModel.previewVoice() },
                     onNavigateBack = { viewModel.navigateTo(CurrentScreen.MAIN) }
                 )
             }

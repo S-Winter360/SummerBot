@@ -49,7 +49,9 @@ sealed interface SummerEvent {
         override val priority: EventPriority = EventPriority.HIGH,
         override val timestamp: Long = System.currentTimeMillis(),
         override val id: String = java.util.UUID.randomUUID().toString()
-    ) : SummerEvent
+    ) : SummerEvent {
+        val transcript: String get() = audioDataPreview
+    }
 
     data class VisionInput(
         val frameSummary: String,
@@ -66,6 +68,55 @@ sealed interface SummerEvent {
         override val source: String = "action.executor",
         override val sessionId: String? = null,
         override val priority: EventPriority = EventPriority.NORMAL,
+        override val timestamp: Long = System.currentTimeMillis(),
+        override val id: String = java.util.UUID.randomUUID().toString()
+    ) : SummerEvent
+
+    data class SpeechStarted(
+        val profileId: String,
+        val providerType: String,
+        val totalChunks: Int,
+        override val source: String = "voice.engine",
+        override val sessionId: String? = null,
+        override val priority: EventPriority = EventPriority.NORMAL,
+        override val timestamp: Long = System.currentTimeMillis(),
+        override val id: String = java.util.UUID.randomUUID().toString()
+    ) : SummerEvent
+
+    data class SpeechProgress(
+        val currentChunk: Int,
+        val textSnippet: String,
+        override val source: String = "voice.engine",
+        override val sessionId: String? = null,
+        override val priority: EventPriority = EventPriority.LOW,
+        override val timestamp: Long = System.currentTimeMillis(),
+        override val id: String = java.util.UUID.randomUUID().toString()
+    ) : SummerEvent
+
+    data class SpeechCompleted(
+        val profileId: String,
+        override val source: String = "voice.engine",
+        override val sessionId: String? = null,
+        override val priority: EventPriority = EventPriority.NORMAL,
+        override val timestamp: Long = System.currentTimeMillis(),
+        override val id: String = java.util.UUID.randomUUID().toString()
+    ) : SummerEvent
+
+    data class SpeechStopped(
+        val reason: String = "Stopped",
+        override val source: String = "voice.engine",
+        override val sessionId: String? = null,
+        override val priority: EventPriority = EventPriority.NORMAL,
+        override val timestamp: Long = System.currentTimeMillis(),
+        override val id: String = java.util.UUID.randomUUID().toString()
+    ) : SummerEvent
+
+    data class SpeechError(
+        val errorMessage: String,
+        val textSnippet: String = "",
+        override val source: String = "voice.engine",
+        override val sessionId: String? = null,
+        override val priority: EventPriority = EventPriority.HIGH,
         override val timestamp: Long = System.currentTimeMillis(),
         override val id: String = java.util.UUID.randomUUID().toString()
     ) : SummerEvent

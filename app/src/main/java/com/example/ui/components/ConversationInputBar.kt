@@ -50,11 +50,12 @@ import com.example.ui.theme.CyanLuminous
 import com.example.ui.theme.SlateBright
 import com.example.ui.theme.SlateLight
 import com.example.ui.theme.SlateMuted
+import com.example.voice.input.SpeechRecognitionState
 
 /**
  * Organic, unified floating interaction surface for communicating with Summer.
- * Combines seamless conversational text entry with ambient microphone presence
- * and glowing floating action feedback.
+ * Combines seamless conversational text entry with ambient microphone presence,
+ * live partial speech transcription, and glowing floating action feedback.
  */
 @Composable
 fun ConversationInputBar(
@@ -63,16 +64,19 @@ fun ConversationInputBar(
     onSubmit: () -> Unit,
     onMicTrigger: () -> Unit,
     isListening: Boolean = false,
+    speechState: SpeechRecognitionState = SpeechRecognitionState.IDLE,
+    partialTranscript: String = "",
     modifier: Modifier = Modifier
 ) {
     val barShape = RoundedCornerShape(32.dp)
+    val activelyListening = isListening || speechState == SpeechRecognitionState.LISTENING
 
     val infiniteTransition = rememberInfiniteTransition(label = "mic_breathing")
     val micGlowAlpha by infiniteTransition.animateFloat(
-        initialValue = if (isListening) 0.50f else 0.15f,
-        targetValue = if (isListening) 0.90f else 0.32f,
+        initialValue = if (activelyListening) 0.50f else 0.15f,
+        targetValue = if (activelyListening) 0.90f else 0.32f,
         animationSpec = infiniteRepeatable(
-            animation = tween(if (isListening) 800 else 2400, easing = FastOutSlowInEasing),
+            animation = tween(if (activelyListening) 800 else 2400, easing = FastOutSlowInEasing),
             repeatMode = RepeatMode.Reverse
         ),
         label = "mic_glow_alpha"
@@ -80,13 +84,28 @@ fun ConversationInputBar(
 
     val micPulseScale by infiniteTransition.animateFloat(
         initialValue = 0.96f,
-        targetValue = if (isListening) 1.14f else 1.04f,
+        targetValue = if (activelyListening) 1.14f else 1.04f,
         animationSpec = infiniteRepeatable(
-            animation = tween(if (isListening) 800 else 2400, easing = FastOutSlowInEasing),
+            animation = tween(if (activelyListening) 800 else 2400, easing = FastOutSlowInEasing),
             repeatMode = RepeatMode.Reverse
         ),
         label = "mic_pulse_scale"
     )
+
+    val buttonBgColor = when (speechState) {
+        SpeechRecognitionState.ERROR -> MaterialTheme.colorScheme.error.copy(alpha = 0.25f)
+        SpeechRecognitionState.INITIALIZING -> CyanLuminous.copy(alpha = 0.3f)
+        SpeechRecognitionState.LISTENING -> CyanLuminous.copy(alpha = micGlowAlpha)
+        SpeechRecognitionState.PROCESSING -> CyanBright.copy(alpha = 0.4f)
+        else -> CyanLuminous.copy(alpha = if (activelyListening) micGlowAlpha else 0.15f)
+    }
+
+    val buttonBorderColor = when (speechState) {
+        SpeechRecognitionState.ERROR -> MaterialTheme.colorScheme.error.copy(alpha = 0.6f)
+        SpeechRecognitionState.LISTENING -> CyanBright.copy(alpha = 0.85f)
+        SpeechRecognitionState.PROCESSING -> CyanLuminous.copy(alpha = 0.7f)
+        else -> CyanBright.copy(alpha = if (activelyListening) 0.8f else 0.3f)
+    }
 
     Row(
         modifier = modifier
@@ -105,10 +124,10 @@ fun ConversationInputBar(
                 .size(48.dp)
                 .scale(micPulseScale)
                 .clip(CircleShape)
-                .background(CyanLuminous.copy(alpha = micGlowAlpha))
+                .background(buttonBgColor)
                 .border(
                     width = 1.dp,
-                    color = CyanBright.copy(alpha = if (isListening) 0.8f else 0.3f),
+                    color = buttonBorderColor,
                     shape = CircleShape
                 )
                 .testTag("mic_button")
@@ -116,12 +135,12 @@ fun ConversationInputBar(
             Icon(
                 imageVector = Icons.Default.Mic,
                 contentDescription = "Microphone voice trigger",
-                tint = if (isListening) CyanBright else SlateBright,
+                tint = if (activelyListening) CyanBright else SlateBright,
                 modifier = Modifier.size(22.dp)
             )
         }
 
-        // Conversational text field
+        // Conversational text field & live speech transcript surface
         Box(
             modifier = Modifier
                 .weight(1f)
@@ -129,10 +148,28 @@ fun ConversationInputBar(
             contentAlignment = Alignment.CenterStart
         ) {
             if (inputText.isEmpty()) {
+                val placeholderText = when (speechState) {
+                    SpeechRecognitionState.LISTENING -> {
+                        if (partialTranscript.isNotBlank()) partialTranscript else "Listening..."
+                    }
+                    SpeechRecognitionState.PROCESSING -> "Processing speech..."
+                    SpeechRecognitionState.INITIALIZING -> "Initializing microphone..."
+                    SpeechRecognitionState.ERROR -> "Could not capture speech. Tap to retry."
+                    else -> "Speak or type to Summer..."
+                }
+
+                val placeholderColor = when {
+                    speechState == SpeechRecognitionState.LISTENING && partialTranscript.isNotBlank() -> CyanBright
+                    speechState == SpeechRecognitionState.LISTENING -> CyanLuminous
+                    speechState == SpeechRecognitionState.PROCESSING -> CyanLuminous
+                    speechState == SpeechRecognitionState.ERROR -> MaterialTheme.colorScheme.error.copy(alpha = 0.8f)
+                    else -> SlateMuted
+                }
+
                 Text(
-                    text = "Speak or type to Summer...",
+                    text = placeholderText,
                     style = MaterialTheme.typography.bodyLarge,
-                    color = SlateMuted
+                    color = placeholderColor
                 )
             }
 

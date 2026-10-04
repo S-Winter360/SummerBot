@@ -15,5 +15,10 @@ data class SummerSettings(
     val cameraAccessAllowed: Boolean = false,
     val internetAccessAllowed: Boolean = true,
     val personalMemoryEnabled: Boolean = true,
-    val learningEnabled: Boolean = false
+    val learningEnabled: Boolean = false,
+    val voiceProfileId: String = "FEMALE",
+    val speechSpeed: Float = 1.0f,
+    val speechPitch: Float = 1.0f,
+    val speechVolume: Float = 1.0f,
+    val preferredVoiceProvider: String = "SYSTEM_OFFLINE"
 )

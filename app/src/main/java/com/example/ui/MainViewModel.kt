@@ -33,10 +33,23 @@ import com.example.network.AndroidNetworkInformationProvider
 import com.example.network.NetworkInformationProvider
 import com.example.network.NetworkState
 import com.example.security.DefaultActionAuthorizationPolicy
+import com.example.vision.AndroidVisionCapabilityDetector
+import com.example.vision.VisionEngine
+import com.example.vision.VisionEngineRouter
+import com.example.voice.engine.VoiceEngineRouter
+import com.example.voice.input.AndroidSpeechRecognitionEngine
+import com.example.voice.input.SpeechRecognitionDiagnostics
+import com.example.voice.input.SpeechRecognitionEngine
+import com.example.voice.input.SpeechRecognitionRouter
+import com.example.voice.input.SpeechRecognitionState
+import com.example.voice.models.VoiceDiagnostics
+import com.example.voice.models.VoiceProfileId
+import com.example.voice.provider.AndroidSystemTtsProvider
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -48,7 +61,8 @@ enum class CurrentScreen {
 
 /**
  * UI-level coordinator ViewModel.
- * Exclusively responsible for binding Compose UI to the central [SummerOrchestrator].
+ * Exclusively responsible for binding Compose UI to the central [SummerOrchestrator],
+ * [VoiceEngineRouter], [VisionEngineRouter], and [SpeechRecognitionRouter].
  * Does NOT contain assistant reasoning, intent classification, or action authorization logic.
  */
 class MainViewModel @JvmOverloads constructor(
@@ -56,7 +70,9 @@ class MainViewModel @JvmOverloads constructor(
     val stateManager: SummerStateManager = SummerStateManager(),
     private val personality: SummerPersonality = SummerPersonality.DEFAULT,
     orchestratorInstance: SummerOrchestrator? = null,
-    genAIStatusProvider: OnDeviceGenAIStatusProvider = AndroidOnDeviceGenAIStatusProvider()
+    genAIStatusProvider: OnDeviceGenAIStatusProvider = AndroidOnDeviceGenAIStatusProvider(),
+    visionEngineInstance: VisionEngine? = null,
+    speechEngineInstance: SpeechRecognitionEngine? = null
 ) : AndroidViewModel(application) {
 
     private val database = SummerDatabase.getInstance(application)
@@ -87,15 +103,6 @@ class MainViewModel @JvmOverloads constructor(
         routerScope = viewModelScope
     )
 
-    init {
-        // Register the on-device GenAI provider in registry
-        aiModelRegistry.register(
-            providerType = AIProviderType.ON_DEVICE_GENAI,
-            engine = onDeviceGenAIProvider,
-            metadata = onDeviceGenAIProvider.metadata
-        )
-    }
-
     val orchestrator: SummerOrchestrator = orchestratorInstance ?: SummerOrchestrator(
         stateManager = stateManager,
         sessionManager = SummerSessionManager(),
@@ -107,6 +114,34 @@ class MainViewModel @JvmOverloads constructor(
         memoryRepository = memoryRepository,
         networkProvider = networkProvider
     )
+
+    // Phase 0F: Voice Architecture & Natural Speech Foundation
+    val systemTtsProvider = AndroidSystemTtsProvider(application)
+    val voiceEngine = VoiceEngineRouter(
+        systemTtsProvider = systemTtsProvider,
+        eventBus = orchestrator.eventBus,
+        scope = viewModelScope
+    )
+
+    // Phase 0G: Vision & Camera Architecture Foundation
+    val visionCapabilityDetector = AndroidVisionCapabilityDetector(application)
+    val visionEngine: VisionEngine = visionEngineInstance ?: VisionEngineRouter(
+        detector = visionCapabilityDetector,
+        eventBus = orchestrator.eventBus,
+        routerScope = viewModelScope
+    )
+
+    // Phase 0H: Speech Recognition & Foreground Listening
+    val speechEngine: SpeechRecognitionEngine = speechEngineInstance ?: AndroidSpeechRecognitionEngine(application)
+    val speechRecognitionRouter = SpeechRecognitionRouter(
+        engine = speechEngine,
+        eventBus = orchestrator.eventBus,
+        scope = viewModelScope
+    )
+
+    val speechRecognitionState: StateFlow<SpeechRecognitionState> = speechRecognitionRouter.state
+    val partialSpeechTranscript: StateFlow<String> = speechRecognitionRouter.partialTranscript
+    val speechDiagnostics: StateFlow<SpeechRecognitionDiagnostics> = speechRecognitionRouter.diagnostics
 
     // Observable states exposed to Compose UI
     val summerState: StateFlow<SummerState> = orchestrator.orchestratorState
@@ -147,10 +182,58 @@ class MainViewModel @JvmOverloads constructor(
             initialValue = "Hello. I am ${personality.shortName}. All cognitive systems are active in local offline mode."
         )
 
-    val aiDiagnostics: StateFlow<AIDiagnostics> = aiModelRouter.diagnostics
+    val voiceDiagnostics: StateFlow<VoiceDiagnostics> = voiceEngine.diagnostics
+    val isSpeaking: StateFlow<Boolean> = voiceEngine.isSpeaking
+
+    val aiDiagnostics: StateFlow<AIDiagnostics> = combine(
+        aiModelRouter.diagnostics,
+        voiceEngine.diagnostics,
+        visionEngine.diagnostics,
+        speechRecognitionRouter.diagnostics
+    ) { aiDiag, voiceDiag, visionDiag, speechDiag ->
+        aiDiag.copy(
+            voiceDiagnostics = voiceDiag,
+            visionDiagnostics = visionDiag,
+            speechDiagnostics = speechDiag
+        )
+    }.stateIn(
+        scope = viewModelScope,
+        started = SharingStarted.WhileSubscribed(5000),
+        initialValue = AIDiagnostics(
+            voiceDiagnostics = voiceEngine.diagnostics.value,
+            visionDiagnostics = visionEngine.diagnostics.value,
+            speechDiagnostics = speechRecognitionRouter.diagnostics.value
+        )
+    )
 
     private val _currentScreen = MutableStateFlow(CurrentScreen.MAIN)
     val currentScreen: StateFlow<CurrentScreen> = _currentScreen.asStateFlow()
+
+    init {
+        // Register the on-device GenAI provider in registry
+        aiModelRegistry.register(
+            providerType = AIProviderType.ON_DEVICE_GENAI,
+            engine = onDeviceGenAIProvider,
+            metadata = onDeviceGenAIProvider.metadata
+        )
+
+        // Observe voice settings and update voiceEngine parameters
+        viewModelScope.launch {
+            settings.collect { s ->
+                val profileId = if (s.voiceProfileId.equals("MALE", ignoreCase = true)) {
+                    VoiceProfileId.MALE
+                } else {
+                    VoiceProfileId.FEMALE
+                }
+                voiceEngine.selectVoiceProfile(profileId)
+                voiceEngine.updateProfileSettings(
+                    speechRate = s.speechSpeed,
+                    pitch = s.speechPitch,
+                    volume = s.speechVolume
+                )
+            }
+        }
+    }
 
     fun navigateTo(screen: CurrentScreen) {
         _currentScreen.value = screen
@@ -167,20 +250,55 @@ class MainViewModel @JvmOverloads constructor(
     }
 
     /**
-     * Submits user input to the cognitive orchestrator.
+     * Activates foreground speech recognition.
+     * Cancels any active speech output, transitions to Listening state,
+     * and delegates final transcript into the orchestrator pipeline.
      */
-    fun submitQuery(query: String) {
+    fun startListening() {
         viewModelScope.launch {
-            orchestrator.handleUserInput(input = query, source = "ui.text_input")
+            voiceEngine.stop()
+            stateManager.transitionTo(SummerState.Listening(), cause = "User activated speech input")
+            speechRecognitionRouter.startListening { transcript ->
+                submitQuery(transcript, source = "voice.engine")
+            }
+        }
+    }
+
+    fun stopListening() {
+        viewModelScope.launch {
+            speechRecognitionRouter.stopListening()
+        }
+    }
+
+    fun cancelListening() {
+        speechRecognitionRouter.cancel()
+    }
+
+    /**
+     * Submits user input to the cognitive orchestrator.
+     * Enforces conversational interruptibility: active speech is immediately cancelled.
+     */
+    fun submitQuery(query: String, source: String = "ui.text_input") {
+        viewModelScope.launch {
+            // Conversational interruptibility
+            voiceEngine.stop()
+
+            val interaction = orchestrator.handleUserInput(input = query, source = source)
+            val responseText = interaction.response?.text
+            if (settings.value.voiceInteractionEnabled && !responseText.isNullOrBlank()) {
+                voiceEngine.speak(responseText)
+            }
         }
     }
 
     /**
-     * Triggers voice action pipeline via orchestrator.
+     * Toggles speech recognition listening on user microphone tap.
      */
     fun triggerVoiceInteraction() {
-        viewModelScope.launch {
-            orchestrator.handleUserInput(input = "test mic", source = "ui.mic_trigger")
+        if (speechRecognitionState.value == SpeechRecognitionState.LISTENING) {
+            stopListening()
+        } else {
+            startListening()
         }
     }
 
@@ -190,6 +308,34 @@ class MainViewModel @JvmOverloads constructor(
     fun refreshAICapabilities() {
         viewModelScope.launch {
             aiModelRouter.refreshCapabilities()
+            voiceEngine.refreshDiagnostics()
+        }
+    }
+
+    fun selectVoiceProfile(profileId: VoiceProfileId) {
+        viewModelScope.launch {
+            val currentSettings = memoryRepository.getSettings()
+            updateSettings(currentSettings.copy(voiceProfileId = profileId.name))
+        }
+    }
+
+    fun setSpeechSpeed(speed: Float) {
+        viewModelScope.launch {
+            val currentSettings = memoryRepository.getSettings()
+            updateSettings(currentSettings.copy(speechSpeed = speed.coerceIn(0.5f, 2.0f)))
+        }
+    }
+
+    fun previewVoice() {
+        viewModelScope.launch {
+            voiceEngine.stop()
+            voiceEngine.speak("Hello. I am ${personality.shortName}. This is my active speech profile.")
+        }
+    }
+
+    fun stopSpeech() {
+        viewModelScope.launch {
+            voiceEngine.stop()
         }
     }
 
@@ -204,4 +350,11 @@ class MainViewModel @JvmOverloads constructor(
     }
 
     fun getPersonality(): SummerPersonality = personality
+
+    override fun onCleared() {
+        super.onCleared()
+        voiceEngine.release()
+        visionEngine.release()
+        speechRecognitionRouter.release()
+    }
 }

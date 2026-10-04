@@ -1,5 +1,9 @@
 package com.example.ui.screens
 
+import android.Manifest
+import android.content.pm.PackageManager
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.RepeatMode
@@ -46,10 +50,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.content.ContextCompat
 import com.example.actions.ActionAuditEntry
 import com.example.core.interaction.SummerInteraction
 import com.example.core.personality.SummerPersonality
@@ -69,6 +75,7 @@ import com.example.ui.theme.SlateBright
 import com.example.ui.theme.SlateLight
 import com.example.ui.theme.SlateMuted
 import com.example.ui.theme.SuccessGreen
+import com.example.voice.input.SpeechRecognitionState
 
 /**
  * Summer's Home Screen — Organic Futurism.
@@ -92,10 +99,34 @@ fun MainSummerScreen(
     onSubmitQuery: (String) -> Unit,
     onMicTrigger: () -> Unit,
     onNavigateToSettings: () -> Unit,
+    speechState: SpeechRecognitionState = SpeechRecognitionState.IDLE,
+    partialSpeechTranscript: String = "",
     modifier: Modifier = Modifier
 ) {
+    val context = LocalContext.current
     var textInput by remember { mutableStateOf("") }
     val isOnline = networkState != NetworkState.OFFLINE
+
+    val permissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { isGranted ->
+        if (isGranted) {
+            onMicTrigger()
+        }
+    }
+
+    val handleMicClick = {
+        val hasPermission = ContextCompat.checkSelfPermission(
+            context,
+            Manifest.permission.RECORD_AUDIO
+        ) == PackageManager.PERMISSION_GRANTED
+
+        if (hasPermission) {
+            onMicTrigger()
+        } else {
+            permissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+        }
+    }
 
     val infiniteTransition = rememberInfiniteTransition(label = "ambient_presence")
     val networkDotPulse by infiniteTransition.animateFloat(
@@ -289,8 +320,10 @@ fun MainSummerScreen(
                     textInput = ""
                 }
             },
-            onMicTrigger = onMicTrigger,
+            onMicTrigger = handleMicClick,
             isListening = state is SummerState.Listening,
+            speechState = speechState,
+            partialTranscript = partialSpeechTranscript,
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(bottom = 20.dp)

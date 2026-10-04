@@ -1,9 +1,13 @@
 package com.example.ai.capability
 
+import com.example.vision.VisionDiagnostics
+import com.example.voice.input.SpeechRecognitionDiagnostics
+import com.example.voice.models.VoiceDiagnostics
+
 /**
- * Concise diagnostics summary of Summer's active AI configuration, capability status, and memory subsystem.
+ * Concise diagnostics summary of Summer's active AI configuration, capability status, memory, voice, vision, and speech-input subsystems.
  * Intended for presentation in settings and development inspection.
- * Distinguishes between detected provider/status, the active runtime provider, and local memory metrics.
+ * Distinguishes between detected provider/status, the active runtime provider, local memory metrics, voice status, camera capability, and speech recognition status.
  */
 data class AIDiagnostics(
     val detectedProvider: AIProviderType = AIProviderType.ON_DEVICE_GENAI,
@@ -27,7 +31,10 @@ data class AIDiagnostics(
     val persistentMemoryCount: Int = 0,
     val recentTurnCount: Int = 0,
     val lastRetrievedMemoryCount: Int = 0,
-    val lastMemoryOperation: String = "NONE"
+    val lastMemoryOperation: String = "NONE",
+    val voiceDiagnostics: VoiceDiagnostics = VoiceDiagnostics(),
+    val visionDiagnostics: VisionDiagnostics = VisionDiagnostics(),
+    val speechDiagnostics: SpeechRecognitionDiagnostics = SpeechRecognitionDiagnostics()
 ) {
     // Backward-compatible properties
     val currentProvider: AIProviderType get() = activeProvider
