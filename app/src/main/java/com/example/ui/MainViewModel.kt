@@ -202,7 +202,7 @@ class MainViewModel @JvmOverloads constructor(
         .stateIn(
             scope = viewModelScope,
             started = SharingStarted.WhileSubscribed(5000),
-            initialValue = "Hello. I am ${personality.shortName}. All cognitive systems are active in local offline mode."
+            initialValue = "Hello. I'm here whenever you'd like to talk."
         )
 
     val voiceDiagnostics: StateFlow<VoiceDiagnostics> = voiceEngine.diagnostics

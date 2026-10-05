@@ -381,8 +381,13 @@ private fun AIDiagnosticsCard(
                             fontWeight = FontWeight.SemiBold,
                             color = SlateBright
                         )
+                        val providerSubtitle = when (diagnostics.activeProvider) {
+                            AIProviderType.ON_DEVICE_GENAI -> "On-Device GenAI (Gemini Nano)"
+                            AIProviderType.EMBEDDED_LOCAL_MODEL -> "Embedded Local Model (LiteRT-LM)"
+                            else -> "Deterministic Offline Core"
+                        }
                         Text(
-                            text = "Official Prompt API Status",
+                            text = providerSubtitle,
                             style = MaterialTheme.typography.bodySmall,
                             color = SlateMuted
                         )
@@ -390,7 +395,7 @@ private fun AIDiagnosticsCard(
                 }
 
                 // Status Badge
-                val (badgeColor, textColor) = when (diagnostics.runtimeStatus) {
+                val (badgeColor, textColor) = when (diagnostics.effectiveStatus) {
                     AIAvailabilityStatus.AVAILABLE -> Pair(CyanLuminous.copy(alpha = 0.2f), CyanBright)
                     AIAvailabilityStatus.DOWNLOADABLE -> Pair(CyanLuminous.copy(alpha = 0.15f), CyanLuminous)
                     AIAvailabilityStatus.DOWNLOADING -> Pair(CyanLuminous.copy(alpha = 0.15f), CyanBright)
@@ -406,7 +411,7 @@ private fun AIDiagnosticsCard(
                         .padding(horizontal = 8.dp, vertical = 4.dp)
                 ) {
                     Text(
-                        text = diagnostics.runtimeStatus.label.uppercase(),
+                        text = diagnostics.effectiveStatus.label.uppercase(),
                         style = MaterialTheme.typography.labelSmall,
                         color = textColor,
                         fontWeight = FontWeight.Bold
@@ -415,32 +420,50 @@ private fun AIDiagnosticsCard(
             }
 
             // Explanatory status description
-            val statusExplanation = when (diagnostics.runtimeStatus) {
-                AIAvailabilityStatus.AVAILABLE -> "On-device GenAI available"
-                AIAvailabilityStatus.DOWNLOADABLE -> "Gemini Nano can be installed on this device."
-                AIAvailabilityStatus.DOWNLOADING -> "Gemini Nano is currently downloading."
-                AIAvailabilityStatus.UNAVAILABLE -> "On-device GenAI unavailable"
-                AIAvailabilityStatus.NOT_SUPPORTED -> "On-device GenAI not supported"
-                AIAvailabilityStatus.CHECKING -> "Checking local AI capability..."
-                AIAvailabilityStatus.ERROR -> "Capability check error"
+            val statusExplanation = when {
+                diagnostics.activeProvider == AIProviderType.EMBEDDED_LOCAL_MODEL ->
+                    "Embedded local generative AI active & offline"
+                diagnostics.activeProvider == AIProviderType.ON_DEVICE_GENAI ->
+                    "On-device GenAI active via Gemini Nano"
+                diagnostics.isFallbackActive ->
+                    "Deterministic local fallback active"
+                else ->
+                    "Local AI cognitive core ready"
             }
 
             Text(
                 text = statusExplanation,
                 style = MaterialTheme.typography.bodySmall,
-                color = if (diagnostics.runtimeStatus == AIAvailabilityStatus.AVAILABLE) CyanBright else SlateLight,
+                color = if (diagnostics.effectiveStatus == AIAvailabilityStatus.AVAILABLE) CyanBright else SlateLight,
                 fontWeight = FontWeight.Medium
             )
 
-            // Rule 17 & Phase 0I: Distinct provider & model states
-            DiagnosticRow(label = "Gemini Nano", value = diagnostics.runtimeStatus.label)
+            // Distinct provider & model states
+            DiagnosticRow(label = "Local AI Engine", value = diagnostics.effectiveStatus.label)
+            DiagnosticRow(label = "Active Provider", value = diagnostics.activeProvider.displayName)
+            DiagnosticRow(label = "Active Model", value = diagnostics.currentModel)
+            DiagnosticRow(label = "Runtime", value = diagnostics.activeRuntime)
+            if (diagnostics.activeQuantization != null) {
+                DiagnosticRow(label = "Quantization", value = diagnostics.activeQuantization)
+            }
+            DiagnosticRow(label = "Mode", value = diagnostics.executionMode)
+            DiagnosticRow(label = "On-device GenAI", value = diagnostics.onDeviceGenAIStatus.label)
+            DiagnosticRow(
+                label = "Gemini Nano",
+                value = if (diagnostics.onDeviceGenAIStatus == AIAvailabilityStatus.AVAILABLE) "Available"
+                else if (diagnostics.isAiCoreInstalled) "Unavailable on this device"
+                else "Not available on this device"
+            )
+            val embeddedLabel = if (diagnostics.embeddedModelStatus == EmbeddedModelStatus.READY || diagnostics.embeddedModelStatus == EmbeddedModelStatus.RUNNING) {
+                "Available"
+            } else {
+                diagnostics.embeddedModelStatus.label
+            }
+            DiagnosticRow(label = "Embedded Local AI", value = embeddedLabel)
             DiagnosticRow(
                 label = "AICore Present",
                 value = if (diagnostics.isAiCoreInstalled) "Installed" else "Not detected"
             )
-            DiagnosticRow(label = "Embedded Model", value = diagnostics.embeddedModelStatus.label)
-            DiagnosticRow(label = "Active Provider", value = diagnostics.activeProvider.displayName)
-            DiagnosticRow(label = "Active Model", value = diagnostics.currentModel)
             DiagnosticRow(
                 label = "Capabilities",
                 value = if (diagnostics.supportedCapabilities.isEmpty()) "Not available"

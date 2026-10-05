@@ -93,7 +93,7 @@ class AIModelRouter(
                 metadata = AIModelMetadata(
                     provider = AIProviderType.EMBEDDED_LOCAL_MODEL,
                     modelIdentifier = "gemma-3-1b-it-litertlm",
-                    displayName = embeddedEngine.modelInfo.name,
+                    displayName = embeddedEngine.modelInfo.name.ifBlank { "Gemma 3 1B IT INT4" },
                     modelVersion = embeddedEngine.modelInfo.version,
                     availabilityStatus = if (isReady) AIAvailabilityStatus.AVAILABLE else AIAvailabilityStatus.UNAVAILABLE,
                     supportedCapabilities = setOf(
@@ -103,7 +103,10 @@ class AIModelRouter(
                         AICapability.SUMMARIZATION
                     ),
                     offlineCapable = true,
-                    multimodalSupport = false
+                    multimodalSupport = false,
+                    runtime = "LiteRT-LM",
+                    quantization = "INT4",
+                    mode = "Offline"
                 )
             )
         }
@@ -112,8 +115,12 @@ class AIModelRouter(
         if (embeddedModelManager != null) {
             routerScope.launch {
                 embeddedModelManager.status.collect { status ->
-                    val availability = if (status == EmbeddedModelStatus.READY) {
+                    val availability = if (status == EmbeddedModelStatus.READY || status == EmbeddedModelStatus.RUNNING) {
                         AIAvailabilityStatus.AVAILABLE
+                    } else if (status == EmbeddedModelStatus.DOWNLOADING || status == EmbeddedModelStatus.IMPORTING || status == EmbeddedModelStatus.VERIFYING) {
+                        AIAvailabilityStatus.DOWNLOADING
+                    } else if (status == EmbeddedModelStatus.CHECKING || status == EmbeddedModelStatus.INITIALIZING) {
+                        AIAvailabilityStatus.CHECKING
                     } else {
                         AIAvailabilityStatus.UNAVAILABLE
                     }
@@ -129,6 +136,9 @@ class AIModelRouter(
             routerScope.launch {
                 refreshCapabilities()
             }
+        } else {
+            val (selectedType, _) = route()
+            updateDiagnostics(selectedType, null)
         }
     }
 
@@ -207,6 +217,8 @@ class AIModelRouter(
                 it.copy(
                     detectedProvider = AIProviderType.ON_DEVICE_GENAI,
                     runtimeStatus = AIAvailabilityStatus.ERROR,
+                    effectiveLocalAIStatus = AIAvailabilityStatus.ERROR,
+                    onDeviceGenAIStatus = AIAvailabilityStatus.ERROR,
                     activeProvider = AIProviderType.DETERMINISTIC_LOCAL,
                     errorMessage = t.message ?: "Capability check failed",
                     isFallbackActive = true
@@ -225,10 +237,55 @@ class AIModelRouter(
             ?: onDeviceMeta?.availabilityStatus
             ?: AIAvailabilityStatus.UNAVAILABLE
 
+        val isEmbeddedReady = embeddedModelManager?.isModelReady() ?: (embeddedEngine?.isReady == true)
+        val embeddedStatus = embeddedModelManager?.status?.value
+            ?: (if (isEmbeddedReady) EmbeddedModelStatus.READY else EmbeddedModelStatus.NOT_INSTALLED)
+
+        val embeddedAvailability = when {
+            isEmbeddedReady || embeddedStatus == EmbeddedModelStatus.READY || embeddedStatus == EmbeddedModelStatus.RUNNING ->
+                AIAvailabilityStatus.AVAILABLE
+            embeddedStatus == EmbeddedModelStatus.DOWNLOADING || embeddedStatus == EmbeddedModelStatus.IMPORTING || embeddedStatus == EmbeddedModelStatus.VERIFYING ->
+                AIAvailabilityStatus.DOWNLOADING
+            embeddedStatus == EmbeddedModelStatus.CHECKING || embeddedStatus == EmbeddedModelStatus.INITIALIZING ->
+                AIAvailabilityStatus.CHECKING
+            embeddedStatus == EmbeddedModelStatus.INSUFFICIENT_STORAGE || embeddedStatus == EmbeddedModelStatus.CORRUPTED || embeddedStatus == EmbeddedModelStatus.ERROR ->
+                AIAvailabilityStatus.ERROR
+            embeddedStatus == EmbeddedModelStatus.INCOMPATIBLE_DEVICE ->
+                AIAvailabilityStatus.NOT_SUPPORTED
+            else ->
+                AIAvailabilityStatus.UNAVAILABLE
+        }
+
+        // Effective overall local AI availability:
+        // 1. If Gemini Nano is AVAILABLE -> AVAILABLE
+        // 2. Else if Embedded Local Model is READY / AVAILABLE -> AVAILABLE
+        // 3. Else if any generative provider is downloading -> DOWNLOADING
+        // 4. Else if checking -> CHECKING
+        // 5. Else baseline deterministic local fallback is available
+        val effectiveStatus = when {
+            genAiStatus == AIAvailabilityStatus.AVAILABLE -> AIAvailabilityStatus.AVAILABLE
+            embeddedAvailability == AIAvailabilityStatus.AVAILABLE -> AIAvailabilityStatus.AVAILABLE
+            genAiStatus == AIAvailabilityStatus.DOWNLOADING || embeddedAvailability == AIAvailabilityStatus.DOWNLOADING -> AIAvailabilityStatus.DOWNLOADING
+            genAiStatus == AIAvailabilityStatus.CHECKING || embeddedAvailability == AIAvailabilityStatus.CHECKING -> AIAvailabilityStatus.CHECKING
+            else -> AIAvailabilityStatus.AVAILABLE
+        }
+
         val activeMeta = when (activeProvider) {
             AIProviderType.ON_DEVICE_GENAI -> onDeviceMeta
             AIProviderType.EMBEDDED_LOCAL_MODEL -> registry.getMetadata(AIProviderType.EMBEDDED_LOCAL_MODEL)
             else -> registry.getMetadata(AIProviderType.DETERMINISTIC_LOCAL)
+        }
+
+        val activeRuntime = when (activeProvider) {
+            AIProviderType.ON_DEVICE_GENAI -> "ML Kit Prompt API"
+            AIProviderType.EMBEDDED_LOCAL_MODEL -> "LiteRT-LM"
+            AIProviderType.DETERMINISTIC_LOCAL -> "Summer Offline Core"
+            else -> "Offline Core"
+        }
+
+        val activeQuantization = when (activeProvider) {
+            AIProviderType.EMBEDDED_LOCAL_MODEL -> "INT4"
+            else -> null
         }
 
         val isOnline = try {
@@ -238,21 +295,26 @@ class AIModelRouter(
         }
 
         val embeddedDiag = embeddedModelManager?.diagnostics?.value ?: EmbeddedModelDiagnostics()
-        val embeddedStatus = embeddedModelManager?.status?.value ?: EmbeddedModelStatus.NOT_INSTALLED
 
         _diagnostics.update {
             it.copy(
                 detectedProvider = AIProviderType.ON_DEVICE_GENAI,
-                runtimeStatus = genAiStatus,
+                runtimeStatus = effectiveStatus,
+                effectiveLocalAIStatus = effectiveStatus,
+                onDeviceGenAIStatus = genAiStatus,
+                embeddedModelStatus = embeddedStatus,
+                deterministicStatus = AIAvailabilityStatus.AVAILABLE,
                 activeProvider = activeProvider,
                 currentModel = activeMeta?.displayName ?: fallbackEngine.modelInfo.name,
+                activeRuntime = activeRuntime,
+                activeQuantization = activeQuantization,
+                executionMode = "Offline",
                 supportedCapabilities = activeMeta?.supportedCapabilities?.toList() ?: listOf(
                     AICapability.CHAT,
                     AICapability.STRUCTURED_OUTPUT,
                     AICapability.TEXT_GENERATION
                 ),
                 isFallbackActive = activeProvider == AIProviderType.DETERMINISTIC_LOCAL,
-                embeddedModelStatus = embeddedStatus,
                 embeddedModelDiagnostics = embeddedDiag,
                 deviceApiLevel = profile?.apiLevel ?: try { android.os.Build.VERSION.SDK_INT } catch (_: Throwable) { 0 },
                 deviceManufacturer = profile?.manufacturer ?: try { android.os.Build.MANUFACTURER ?: "Generic" } catch (_: Throwable) { "Generic" },

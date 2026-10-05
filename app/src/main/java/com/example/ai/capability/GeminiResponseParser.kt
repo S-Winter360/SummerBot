@@ -205,7 +205,7 @@ class GeminiResponseParser {
             return operations
         }
 
-        // 2. Explicit UPDATE commands
+        // 2. Explicit UPDATE commands & natural user corrections
         if (normalizedInput.startsWith("actually, ") || normalizedInput.startsWith("update my ") ||
             normalizedInput.startsWith("change my ")
         ) {
@@ -239,6 +239,51 @@ class GeminiResponseParser {
                 )
             }
             return operations
+        }
+
+        // 2b. Natural user corrections (e.g. "My favourite language isn't Java. It's Python.")
+        val hasNegation = normalizedInput.contains(" isn't ") || normalizedInput.contains(" is not ")
+        val hasReplacement = normalizedInput.contains(" it's ") || normalizedInput.contains(" it is ") ||
+            normalizedInput.contains(". it's ") || normalizedInput.contains(". it is ") ||
+            normalizedInput.contains(".it's") || normalizedInput.contains(".it is")
+        if (hasNegation && hasReplacement) {
+            val separator = if (normalizedInput.contains(" isn't ")) " isn't " else " is not "
+            val afterNot = rawInput.substringAfter(separator, "").trim()
+            val previousTarget = when {
+                afterNot.contains(". ") -> afterNot.substringBefore(". ")
+                afterNot.contains(".") -> afterNot.substringBefore(".")
+                afterNot.contains("It's", ignoreCase = true) -> afterNot.substring(0, afterNot.indexOf("It's", ignoreCase = true))
+                afterNot.contains("It is", ignoreCase = true) -> afterNot.substring(0, afterNot.indexOf("It is", ignoreCase = true))
+                else -> afterNot
+            }.trim()
+
+            val newPreference = when {
+                afterNot.contains("It's") -> afterNot.substringAfter("It's")
+                afterNot.contains("it's") -> afterNot.substringAfter("it's")
+                afterNot.contains("It is") -> afterNot.substringAfter("It is")
+                afterNot.contains("it is") -> afterNot.substringAfter("it is")
+                else -> ""
+            }.trim().trimStart(':', ' ').trimEnd('.')
+
+            if (newPreference.isNotBlank()) {
+                val subject = rawInput.substringBefore(separator).trim()
+                val updatedContent = if (subject.isNotBlank()) "$subject: $newPreference" else newPreference
+                val record = MemoryRecord(
+                    category = determineCategory(updatedContent),
+                    title = "Corrected Preference",
+                    content = updatedContent,
+                    source = MemorySource.USER_UPDATE,
+                    importance = MemoryImportance.NORMAL,
+                    confidence = 1.0f
+                )
+                operations.add(
+                    MemoryOperation.Update(
+                        record = record,
+                        previousContent = previousTarget.ifBlank { null }
+                    )
+                )
+                return operations
+            }
         }
 
         // 3. Explicit STORE commands

@@ -99,7 +99,7 @@ class SummerOrchestrator(
 
     private val _latestResponse = MutableStateFlow<SummerResponse?>(
         SummerResponse(
-            text = "Hello. I am Summer. All cognitive systems are active in local offline mode.",
+            text = "Hello. I'm here whenever you'd like to talk.",
             type = ResponseType.INFORMATION,
             source = "Summer Initialization"
         )

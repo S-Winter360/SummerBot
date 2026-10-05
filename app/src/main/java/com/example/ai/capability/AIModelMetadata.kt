@@ -13,5 +13,8 @@ data class AIModelMetadata(
     val maxOutputTokens: Int? = null,
     val isStreamingSupported: Boolean? = null,
     val deviceRequirements: String? = null,
+    val runtime: String? = null,
+    val quantization: String? = null,
+    val mode: String = "Offline",
     val lastCheckedTimestamp: Long = System.currentTimeMillis()
 )

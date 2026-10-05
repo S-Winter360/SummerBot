@@ -11,6 +11,8 @@ data class EmbeddedModelMetadata(
     val installedSizeBytes: Long? = null,
     val sha256Checksum: String? = null,
     val backend: String = "CPU",
+    val runtime: String = id.runtime,
+    val quantization: String = id.quantization,
     val isQuantized: Boolean = true,
     val maxTokens: Int = 1024,
     val installedTimestamp: Long? = null

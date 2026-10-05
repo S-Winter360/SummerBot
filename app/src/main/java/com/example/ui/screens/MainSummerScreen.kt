@@ -305,40 +305,9 @@ fun MainSummerScreen(
             modifier = Modifier.padding(vertical = 4.dp)
         )
 
-        Spacer(modifier = Modifier.height(12.dp))
-
-        // 6. Conversational Suggestions (Natural, floating chips)
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(vertical = 4.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            OrganicSuggestionChip(
-                label = "Say hello",
-                onClick = { onSubmitQuery("Hello Summer") },
-                modifier = Modifier.weight(1f)
-            )
-            OrganicSuggestionChip(
-                label = "Who are you?",
-                onClick = { onSubmitQuery("What is your name?") },
-                modifier = Modifier.weight(1f)
-            )
-            OrganicSuggestionChip(
-                label = "Capabilities",
-                onClick = { onSubmitQuery("What can you do?") },
-                modifier = Modifier.weight(1f)
-            )
-            OrganicSuggestionChip(
-                label = "Time",
-                onClick = { onSubmitQuery("What time is it?") },
-                modifier = Modifier.weight(1f)
-            )
-        }
-
         Spacer(modifier = Modifier.height(16.dp))
 
-        // 7. Unified Organic Floating Interaction Surface
+        // 6. Unified Organic Floating Interaction Surface
         ConversationInputBar(
             inputText = textInput,
             onInputChange = { textInput = it },
@@ -355,34 +324,6 @@ fun MainSummerScreen(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(bottom = 20.dp)
-        )
-    }
-}
-
-/**
- * Organic, soft floating suggestion chip.
- */
-@Composable
-private fun OrganicSuggestionChip(
-    label: String,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier
-) {
-    Box(
-        modifier = modifier
-            .clip(RoundedCornerShape(20.dp))
-            .background(CoreCharcoalSurface.copy(alpha = 0.50f))
-            .border(1.dp, CoreCharcoalBorder.copy(alpha = 0.35f), RoundedCornerShape(20.dp))
-            .clickable { onClick() }
-            .padding(horizontal = 10.dp, vertical = 10.dp),
-        contentAlignment = Alignment.Center
-    ) {
-        Text(
-            text = label,
-            style = MaterialTheme.typography.labelSmall.copy(
-                fontWeight = FontWeight.Medium
-            ),
-            color = SlateLight
         )
     }
 }

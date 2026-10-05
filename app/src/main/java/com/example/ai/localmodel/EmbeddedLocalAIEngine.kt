@@ -26,6 +26,8 @@ import com.google.ai.edge.litertlm.ConversationConfig
 import com.google.ai.edge.litertlm.Engine
 import com.google.ai.edge.litertlm.EngineConfig
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.sync.Mutex
@@ -61,7 +63,7 @@ class EmbeddedLocalAIEngine(
     var metadata: AIModelMetadata = AIModelMetadata(
         provider = AIProviderType.EMBEDDED_LOCAL_MODEL,
         modelIdentifier = "gemma-3-1b-it-litertlm",
-        displayName = "Gemma 3 1B IT",
+        displayName = "Gemma 3 1B IT INT4",
         modelVersion = "1.0-4bit",
         availabilityStatus = if (modelManager.isModelReady()) AIAvailabilityStatus.AVAILABLE else AIAvailabilityStatus.UNAVAILABLE,
         supportedCapabilities = setOf(
@@ -71,7 +73,10 @@ class EmbeddedLocalAIEngine(
             AICapability.SUMMARIZATION
         ),
         offlineCapable = true,
-        multimodalSupport = false
+        multimodalSupport = false,
+        runtime = "LiteRT-LM",
+        quantization = "INT4",
+        mode = "Offline"
     )
         private set
 
@@ -94,7 +99,7 @@ class EmbeddedLocalAIEngine(
         engineMutex.withLock {
             val modelPath = modelManager.getInstalledModelPath() ?: return@withContext false
 
-            if (litertEngine != null && activeConversation != null && currentLoadedPath == modelPath) {
+            if (litertEngine != null && currentLoadedPath == modelPath) {
                 return@withContext true
             }
 
@@ -113,15 +118,7 @@ class EmbeddedLocalAIEngine(
                 val engine = Engine(config)
                 engine.initialize()
 
-                val systemPrompt = "You are ${personality.fullName} (${personality.shortName}), an observant, calm, intelligent personal AI companion running on this Android device. Speak warmly, concisely, thoughtfully, and clearly."
-                val convConfig = ConversationConfig(
-                    systemInstruction = Contents.of(systemPrompt)
-                )
-
-                val conversation = engine.createConversation(convConfig)
-
                 litertEngine = engine
-                activeConversation = conversation
                 currentLoadedPath = modelPath
 
                 metadata = metadata.copy(
@@ -245,15 +242,25 @@ class EmbeddedLocalAIEngine(
 
     /**
      * Executes prompt inference using the active conversation.
+     * Keeps latency bounded turn-after-turn by evaluating against the structured prompt
+     * on the resident LiteRT-LM engine.
      */
     private suspend fun executeInference(prompt: String): String? = withContext(Dispatchers.IO) {
         engineMutex.withLock {
-            val conversation = activeConversation ?: return@withContext null
+            val engine = litertEngine ?: return@withContext null
             val sb = StringBuilder()
 
+            val systemPrompt = promptBuilder.buildSystemInstruction()
+            val convConfig = ConversationConfig(
+                systemInstruction = Contents.of(systemPrompt)
+            )
+            var conversation: Conversation? = null
+
             try {
+                conversation = engine.createConversation(convConfig)
                 val flow = conversation.sendMessageAsync(prompt)
                 flow.collect { message ->
+                    kotlinx.coroutines.currentCoroutineContext().ensureActive()
                     val contents = message.contents.contents
                     for (c in contents) {
                         if (c is Content.Text) {
@@ -263,8 +270,13 @@ class EmbeddedLocalAIEngine(
                 }
                 sb.toString().trim().ifBlank { null }
             } catch (t: Throwable) {
+                if (t is kotlinx.coroutines.CancellationException) throw t
                 logError("Inference execution failed", t)
                 null
+            } finally {
+                try {
+                    conversation?.close()
+                } catch (_: Throwable) {}
             }
         }
     }
@@ -280,15 +292,27 @@ class EmbeddedLocalAIEngine(
         }
 
         engineMutex.withLock {
-            val conversation = activeConversation ?: return@flow
-            val flow = conversation.sendMessageAsync(prompt)
-            flow.collect { message ->
-                val contents = message.contents.contents
-                for (c in contents) {
-                    if (c is Content.Text) {
-                        emit(c.text)
+            val engine = litertEngine ?: return@flow
+            val systemPrompt = promptBuilder.buildSystemInstruction()
+            val convConfig = ConversationConfig(
+                systemInstruction = Contents.of(systemPrompt)
+            )
+            var conversation: Conversation? = null
+            try {
+                conversation = engine.createConversation(convConfig)
+                val flow = conversation.sendMessageAsync(prompt)
+                flow.collect { message ->
+                    val contents = message.contents.contents
+                    for (c in contents) {
+                        if (c is Content.Text) {
+                            emit(c.text)
+                        }
                     }
                 }
+            } finally {
+                try {
+                    conversation?.close()
+                } catch (_: Throwable) {}
             }
         }
     }

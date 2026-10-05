@@ -7,14 +7,18 @@ package com.example.ai.localmodel
 enum class EmbeddedModelStatus(val label: String) {
     NOT_INSTALLED("Not installed"),
     CHECKING("Checking"),
+    IMPORTING("Importing"),
     DOWNLOADING("Downloading"),
     VERIFYING("Verifying"),
     READY("Ready"),
     INITIALIZING("Initializing"),
     RUNNING("Running"),
     ERROR("Error"),
+    UNAVAILABLE("Unavailable"),
     INSUFFICIENT_STORAGE("Insufficient storage"),
     INCOMPATIBLE_DEVICE("Incompatible device"),
     CORRUPTED("Corrupted"),
-    CANCELLED("Cancelled")
+    CANCELLED("Cancelled");
+
+    val isAvailable: Boolean get() = this == READY || this == RUNNING
 }
