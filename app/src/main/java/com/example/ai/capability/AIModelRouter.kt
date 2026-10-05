@@ -2,6 +2,9 @@ package com.example.ai.capability
 
 import com.example.ai.AIEngine
 import com.example.ai.OfflineLocalAIEngine
+import com.example.ai.localmodel.EmbeddedModelDiagnostics
+import com.example.ai.localmodel.EmbeddedModelManager
+import com.example.ai.localmodel.EmbeddedModelStatus
 import com.example.ai.models.AIModelInfo
 import com.example.ai.models.AIRequest
 import com.example.ai.models.AIResponse
@@ -24,15 +27,19 @@ import kotlinx.coroutines.launch
 /**
  * Intelligent routing layer for AI execution in Summer.
  * Decouples [com.example.core.orchestrator.SummerOrchestrator] from concrete AI providers.
- * Authoritatively routes to On-Device GenAI ONLY when runtime status is [AIAvailabilityStatus.AVAILABLE].
- * For all other states (DOWNLOADABLE, DOWNLOADING, UNAVAILABLE, NOT_SUPPORTED, ERROR, CHECKING),
- * routing falls back safely to [OfflineLocalAIEngine].
+ *
+ * Hierarchy:
+ * 1. ON_DEVICE_GENAI (Gemini Nano) if AIAvailabilityStatus == AVAILABLE
+ * 2. EMBEDDED_LOCAL_MODEL (Google LiteRT-LM / Gemma 3 1B IT) if status == READY
+ * 3. DETERMINISTIC_LOCAL (Summer Offline Core) as safe baseline fallback
  */
 class AIModelRouter(
     val registry: AIModelRegistry,
     val fallbackEngine: OfflineLocalAIEngine,
     private val detector: DeviceAICapabilityDetector? = null,
     private val networkProvider: NetworkInformationProvider? = null,
+    private val embeddedModelManager: EmbeddedModelManager? = null,
+    private val embeddedEngine: AIEngine? = null,
     private val routerScope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 ) : AIEngine {
 
@@ -77,6 +84,46 @@ class AIModelRouter(
             )
         )
 
+        // Register embedded engine if provided
+        if (embeddedEngine != null) {
+            val isReady = embeddedModelManager?.isModelReady() ?: embeddedEngine.isReady
+            registry.register(
+                providerType = AIProviderType.EMBEDDED_LOCAL_MODEL,
+                engine = embeddedEngine,
+                metadata = AIModelMetadata(
+                    provider = AIProviderType.EMBEDDED_LOCAL_MODEL,
+                    modelIdentifier = "gemma-3-1b-it-litertlm",
+                    displayName = embeddedEngine.modelInfo.name,
+                    modelVersion = embeddedEngine.modelInfo.version,
+                    availabilityStatus = if (isReady) AIAvailabilityStatus.AVAILABLE else AIAvailabilityStatus.UNAVAILABLE,
+                    supportedCapabilities = setOf(
+                        AICapability.CHAT,
+                        AICapability.STRUCTURED_OUTPUT,
+                        AICapability.TEXT_GENERATION,
+                        AICapability.SUMMARIZATION
+                    ),
+                    offlineCapable = true,
+                    multimodalSupport = false
+                )
+            )
+        }
+
+        // Observe embedded model manager status changes
+        if (embeddedModelManager != null) {
+            routerScope.launch {
+                embeddedModelManager.status.collect { status ->
+                    val availability = if (status == EmbeddedModelStatus.READY) {
+                        AIAvailabilityStatus.AVAILABLE
+                    } else {
+                        AIAvailabilityStatus.UNAVAILABLE
+                    }
+                    registry.updateAvailability(AIProviderType.EMBEDDED_LOCAL_MODEL, availability)
+                    val (selectedType, _) = route()
+                    updateDiagnostics(selectedType, null)
+                }
+            }
+        }
+
         // Asynchronously run initial capability check
         if (detector != null) {
             routerScope.launch {
@@ -87,10 +134,9 @@ class AIModelRouter(
 
     /**
      * Dynamically chooses the appropriate AI provider for a required [AICapability].
-     * ONLY [AIAvailabilityStatus.AVAILABLE] enables ON_DEVICE_GENAI.
-     * All other states (DOWNLOADABLE, DOWNLOADING, UNAVAILABLE, NOT_SUPPORTED, ERROR, CHECKING)
-     * guarantee fallback to DETERMINISTIC_LOCAL.
-     * Cloud is strictly excluded.
+     * 1. ON_DEVICE_GENAI if Gemini Nano is AVAILABLE.
+     * 2. EMBEDDED_LOCAL_MODEL if embedded model is READY / AVAILABLE.
+     * 3. DETERMINISTIC_LOCAL fallback.
      */
     fun route(capability: AICapability = AICapability.TEXT_GENERATION): Pair<AIProviderType, AIEngine> {
         val onDeviceMeta = registry.getMetadata(AIProviderType.ON_DEVICE_GENAI)
@@ -107,15 +153,17 @@ class AIModelRouter(
         }
 
         val embeddedMeta = registry.getMetadata(AIProviderType.EMBEDDED_LOCAL_MODEL)
-        val embeddedEngine = registry.getEngine(AIProviderType.EMBEDDED_LOCAL_MODEL)
+        val engine = registry.getEngine(AIProviderType.EMBEDDED_LOCAL_MODEL) ?: embeddedEngine
+        val isEmbeddedReady = embeddedModelManager?.isModelReady() ?: (engine?.isReady == true)
+
         if (embeddedMeta != null &&
-            embeddedMeta.availabilityStatus == AIAvailabilityStatus.AVAILABLE &&
+            (embeddedMeta.availabilityStatus == AIAvailabilityStatus.AVAILABLE || isEmbeddedReady) &&
             capability in embeddedMeta.supportedCapabilities &&
-            embeddedEngine != null &&
-            embeddedEngine.isReady
+            engine != null &&
+            isEmbeddedReady
         ) {
             logInfo("Routing capability [$capability] to Embedded Local Model provider.")
-            return Pair(AIProviderType.EMBEDDED_LOCAL_MODEL, embeddedEngine)
+            return Pair(AIProviderType.EMBEDDED_LOCAL_MODEL, engine)
         }
 
         // Guaranteed deterministic local fallback
@@ -131,8 +179,9 @@ class AIModelRouter(
         _diagnostics.update { it.copy(runtimeStatus = AIAvailabilityStatus.CHECKING) }
 
         if (detector == null) {
-            logInfo("No detector provided; keeping deterministic fallback.")
-            updateDiagnostics(AIProviderType.DETERMINISTIC_LOCAL, null)
+            logInfo("No detector provided; evaluating active route.")
+            val (selectedType, _) = route()
+            updateDiagnostics(selectedType, null)
             return null
         }
 
@@ -176,10 +225,10 @@ class AIModelRouter(
             ?: onDeviceMeta?.availabilityStatus
             ?: AIAvailabilityStatus.UNAVAILABLE
 
-        val activeMeta = if (activeProvider == AIProviderType.ON_DEVICE_GENAI) {
-            onDeviceMeta
-        } else {
-            registry.getMetadata(AIProviderType.DETERMINISTIC_LOCAL)
+        val activeMeta = when (activeProvider) {
+            AIProviderType.ON_DEVICE_GENAI -> onDeviceMeta
+            AIProviderType.EMBEDDED_LOCAL_MODEL -> registry.getMetadata(AIProviderType.EMBEDDED_LOCAL_MODEL)
+            else -> registry.getMetadata(AIProviderType.DETERMINISTIC_LOCAL)
         }
 
         val isOnline = try {
@@ -188,8 +237,11 @@ class AIModelRouter(
             profile?.isNetworkAvailable ?: false
         }
 
+        val embeddedDiag = embeddedModelManager?.diagnostics?.value ?: EmbeddedModelDiagnostics()
+        val embeddedStatus = embeddedModelManager?.status?.value ?: EmbeddedModelStatus.NOT_INSTALLED
+
         _diagnostics.update {
-            AIDiagnostics(
+            it.copy(
                 detectedProvider = AIProviderType.ON_DEVICE_GENAI,
                 runtimeStatus = genAiStatus,
                 activeProvider = activeProvider,
@@ -200,6 +252,8 @@ class AIModelRouter(
                     AICapability.TEXT_GENERATION
                 ),
                 isFallbackActive = activeProvider == AIProviderType.DETERMINISTIC_LOCAL,
+                embeddedModelStatus = embeddedStatus,
+                embeddedModelDiagnostics = embeddedDiag,
                 deviceApiLevel = profile?.apiLevel ?: try { android.os.Build.VERSION.SDK_INT } catch (_: Throwable) { 0 },
                 deviceManufacturer = profile?.manufacturer ?: try { android.os.Build.MANUFACTURER ?: "Generic" } catch (_: Throwable) { "Generic" },
                 deviceModel = profile?.model ?: try { android.os.Build.MODEL ?: "Device" } catch (_: Throwable) { "Device" },
@@ -270,3 +324,4 @@ class AIModelRouter(
         }
     }
 }
+

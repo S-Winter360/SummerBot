@@ -5,6 +5,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.actions.ActionAuditEntry
 import com.example.actions.SecuredActionExecutor
+import com.example.ai.AIEngine
 import com.example.ai.OfflineLocalAIEngine
 import com.example.ai.capability.AIDiagnostics
 import com.example.ai.capability.AIModelMetadata
@@ -16,6 +17,11 @@ import com.example.ai.capability.AndroidOnDeviceGenAIStatusProvider
 import com.example.ai.capability.DeviceAICapabilityDetector
 import com.example.ai.capability.OnDeviceGenAIProvider
 import com.example.ai.capability.OnDeviceGenAIStatusProvider
+import com.example.ai.localmodel.DefaultEmbeddedModelManager
+import com.example.ai.localmodel.EmbeddedLocalAIEngine
+import com.example.ai.localmodel.EmbeddedModelDiagnostics
+import com.example.ai.localmodel.EmbeddedModelManager
+import com.example.ai.localmodel.EmbeddedModelStatus
 import com.example.core.decision.DefaultSummerDecisionEngine
 import com.example.core.event.SummerEventBus
 import com.example.core.interaction.SummerInteraction
@@ -53,6 +59,7 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import java.io.Closeable
 
 enum class CurrentScreen {
     MAIN,
@@ -62,7 +69,7 @@ enum class CurrentScreen {
 /**
  * UI-level coordinator ViewModel.
  * Exclusively responsible for binding Compose UI to the central [SummerOrchestrator],
- * [VoiceEngineRouter], [VisionEngineRouter], and [SpeechRecognitionRouter].
+ * [VoiceEngineRouter], [VisionEngineRouter], [SpeechRecognitionRouter], and [EmbeddedModelManager].
  * Does NOT contain assistant reasoning, intent classification, or action authorization logic.
  */
 class MainViewModel @JvmOverloads constructor(
@@ -72,7 +79,9 @@ class MainViewModel @JvmOverloads constructor(
     orchestratorInstance: SummerOrchestrator? = null,
     genAIStatusProvider: OnDeviceGenAIStatusProvider = AndroidOnDeviceGenAIStatusProvider(),
     visionEngineInstance: VisionEngine? = null,
-    speechEngineInstance: SpeechRecognitionEngine? = null
+    speechEngineInstance: SpeechRecognitionEngine? = null,
+    embeddedModelManagerInstance: EmbeddedModelManager? = null,
+    embeddedEngineInstance: AIEngine? = null
 ) : AndroidViewModel(application) {
 
     private val database = SummerDatabase.getInstance(application)
@@ -85,7 +94,15 @@ class MainViewModel @JvmOverloads constructor(
     val actionExecutor = SecuredActionExecutor(authorizationPolicy)
     val networkProvider: NetworkInformationProvider = AndroidNetworkInformationProvider(application)
 
-    // Phase 0C-R1: Local AI Capability, Registry & Routing Layer backed by official ML Kit GenAI Prompt API
+    // Phase 0I: Embedded Local Generative AI & Model Lifecycle Management
+    val embeddedModelManager: EmbeddedModelManager = embeddedModelManagerInstance ?: DefaultEmbeddedModelManager(application)
+    val embeddedEngine: AIEngine = embeddedEngineInstance ?: EmbeddedLocalAIEngine(
+        context = application,
+        modelManager = embeddedModelManager,
+        personality = personality
+    )
+
+    // Phase 0C-R1 / Phase 0I: Local AI Capability, Registry & 3-Tier Routing Layer
     val aiModelRegistry = AIModelRegistry()
     val onDeviceGenAIProvider = OnDeviceGenAIProvider(statusProvider = genAIStatusProvider)
     val fallbackAIEngine = OfflineLocalAIEngine(personality)
@@ -100,6 +117,8 @@ class MainViewModel @JvmOverloads constructor(
         fallbackEngine = fallbackAIEngine,
         detector = deviceCapabilityDetector,
         networkProvider = networkProvider,
+        embeddedModelManager = embeddedModelManager,
+        embeddedEngine = embeddedEngine,
         routerScope = viewModelScope
     )
 
@@ -142,6 +161,10 @@ class MainViewModel @JvmOverloads constructor(
     val speechRecognitionState: StateFlow<SpeechRecognitionState> = speechRecognitionRouter.state
     val partialSpeechTranscript: StateFlow<String> = speechRecognitionRouter.partialTranscript
     val speechDiagnostics: StateFlow<SpeechRecognitionDiagnostics> = speechRecognitionRouter.diagnostics
+
+    val embeddedModelStatus: StateFlow<EmbeddedModelStatus> = embeddedModelManager.status
+    val embeddedModelDiagnostics: StateFlow<EmbeddedModelDiagnostics> = embeddedModelManager.diagnostics
+    val embeddedDownloadProgress: StateFlow<Float> = embeddedModelManager.downloadProgress
 
     // Observable states exposed to Compose UI
     val summerState: StateFlow<SummerState> = orchestrator.orchestratorState
@@ -349,10 +372,42 @@ class MainViewModel @JvmOverloads constructor(
         orchestrator.sessionManager.startNewSession()
     }
 
+    /**
+     * Installs the embedded local generative language model (Gemma 3 1B IT).
+     */
+    fun installEmbeddedModel() {
+        viewModelScope.launch {
+            embeddedModelManager.install()
+            aiModelRouter.refreshCapabilities()
+        }
+    }
+
+    /**
+     * Cancels an ongoing embedded model download.
+     */
+    fun cancelEmbeddedModelDownload() {
+        viewModelScope.launch {
+            embeddedModelManager.cancelDownload()
+        }
+    }
+
+    /**
+     * Deletes the installed embedded local model and frees storage.
+     * Preserves all user memories, settings, and conversation history.
+     */
+    fun deleteEmbeddedModel() {
+        viewModelScope.launch {
+            (embeddedEngine as? Closeable)?.close()
+            embeddedModelManager.deleteInstalledModel()
+            aiModelRouter.refreshCapabilities()
+        }
+    }
+
     fun getPersonality(): SummerPersonality = personality
 
     override fun onCleared() {
         super.onCleared()
+        (embeddedEngine as? Closeable)?.close()
         voiceEngine.release()
         visionEngine.release()
         speechRecognitionRouter.release()

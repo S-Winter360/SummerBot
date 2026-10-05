@@ -1,5 +1,7 @@
 package com.example.ai.capability
 
+import com.example.ai.localmodel.EmbeddedModelDiagnostics
+import com.example.ai.localmodel.EmbeddedModelStatus
 import com.example.vision.VisionDiagnostics
 import com.example.voice.input.SpeechRecognitionDiagnostics
 import com.example.voice.models.VoiceDiagnostics
@@ -20,6 +22,8 @@ data class AIDiagnostics(
         AICapability.TEXT_GENERATION
     ),
     val isFallbackActive: Boolean = true,
+    val embeddedModelStatus: EmbeddedModelStatus = EmbeddedModelStatus.NOT_INSTALLED,
+    val embeddedModelDiagnostics: EmbeddedModelDiagnostics = EmbeddedModelDiagnostics(),
     val deviceApiLevel: Int = try { android.os.Build.VERSION.SDK_INT } catch (_: Throwable) { 0 },
     val deviceManufacturer: String = try { android.os.Build.MANUFACTURER ?: "Generic" } catch (_: Throwable) { "Generic" },
     val deviceModel: String = try { android.os.Build.MODEL ?: "Device" } catch (_: Throwable) { "Device" },

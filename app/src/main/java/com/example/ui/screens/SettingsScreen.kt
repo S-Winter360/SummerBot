@@ -24,7 +24,10 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.CameraAlt
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.CloudQueue
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Hearing
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Psychology
@@ -33,11 +36,13 @@ import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.Storage
 import androidx.compose.material.icons.filled.TouchApp
+import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Switch
@@ -54,6 +59,7 @@ import androidx.compose.ui.unit.dp
 import com.example.ai.capability.AIDiagnostics
 import com.example.ai.capability.AIAvailabilityStatus
 import com.example.ai.capability.AIProviderType
+import com.example.ai.localmodel.EmbeddedModelStatus
 import com.example.memory.models.SummerSettings
 import com.example.ui.theme.CoreBlack
 import com.example.ui.theme.CoreCharcoalBorder
@@ -75,6 +81,9 @@ fun SettingsScreen(
     aiDiagnostics: AIDiagnostics = AIDiagnostics(),
     onUpdateSettings: (SummerSettings) -> Unit,
     onRefreshAIDiagnostics: () -> Unit = {},
+    onInstallEmbeddedModel: () -> Unit = {},
+    onCancelEmbeddedModelDownload: () -> Unit = {},
+    onDeleteEmbeddedModel: () -> Unit = {},
     onClearMemories: () -> Unit = {},
     onClearConversation: () -> Unit = {},
     onSelectVoiceProfile: (VoiceProfileId) -> Unit = {},
@@ -145,7 +154,7 @@ fun SettingsScreen(
             tag = "toggle_summer_enabled"
         )
 
-        // Phase 0C-R1: Local AI & Capability Diagnostics
+        // Phase 0C-R1 / Phase 0I: Local AI & Capability Diagnostics
         Text(
             text = "LOCAL AI & CAPABILITY DIAGNOSTICS",
             style = MaterialTheme.typography.labelSmall,
@@ -156,6 +165,14 @@ fun SettingsScreen(
         AIDiagnosticsCard(
             diagnostics = aiDiagnostics,
             onRefresh = onRefreshAIDiagnostics
+        )
+
+        // Phase 0I: Embedded Local Model Management
+        EmbeddedModelManagementCard(
+            diagnostics = aiDiagnostics,
+            onInstall = onInstallEmbeddedModel,
+            onCancel = onCancelEmbeddedModelDownload,
+            onDelete = onDeleteEmbeddedModel
         )
 
         // Section: Voice & Audio Interaction
@@ -411,12 +428,14 @@ private fun AIDiagnosticsCard(
                 fontWeight = FontWeight.Medium
             )
 
-            // Rule 17: Distinguish Detected Provider from Active Provider
-            DiagnosticRow(label = "Detected Provider", value = diagnostics.detectedProvider.displayName)
+            // Rule 17 & Phase 0I: Distinct provider & model states
+            DiagnosticRow(label = "Gemini Nano", value = diagnostics.runtimeStatus.label)
             DiagnosticRow(
-                label = "Active Provider",
-                value = if (diagnostics.activeProvider == AIProviderType.ON_DEVICE_GENAI) "On-Device GenAI" else "Deterministic Local"
+                label = "AICore Present",
+                value = if (diagnostics.isAiCoreInstalled) "Installed" else "Not detected"
             )
+            DiagnosticRow(label = "Embedded Model", value = diagnostics.embeddedModelStatus.label)
+            DiagnosticRow(label = "Active Provider", value = diagnostics.activeProvider.displayName)
             DiagnosticRow(label = "Active Model", value = diagnostics.currentModel)
             DiagnosticRow(
                 label = "Capabilities",
@@ -426,10 +445,6 @@ private fun AIDiagnosticsCard(
             DiagnosticRow(
                 label = "Fallback Status",
                 value = if (diagnostics.isFallbackActive) "Active (Deterministic Core)" else "Standby"
-            )
-            DiagnosticRow(
-                label = "AICore Present",
-                value = if (diagnostics.isAiCoreInstalled) "Installed" else "Not detected"
             )
             DiagnosticRow(
                 label = "Device Profile",
@@ -473,6 +488,261 @@ private fun AIDiagnosticsCard(
                     text = "Refresh AI Status",
                     style = MaterialTheme.typography.labelMedium
                 )
+            }
+        }
+    }
+}
+
+@Composable
+private fun EmbeddedModelManagementCard(
+    diagnostics: AIDiagnostics,
+    onInstall: () -> Unit,
+    onCancel: () -> Unit,
+    onDelete: () -> Unit
+) {
+    val modelDiag = diagnostics.embeddedModelDiagnostics
+    val status = diagnostics.embeddedModelStatus
+
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag("embedded_model_card"),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = CoreCharcoalSurface.copy(alpha = 0.9f)
+        ),
+        border = androidx.compose.foundation.BorderStroke(1.dp, CoreCharcoalBorder.copy(alpha = 0.8f))
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(36.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(CoreCharcoalElevated),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Psychology,
+                            contentDescription = null,
+                            tint = CyanLuminous,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+                    Column {
+                        Text(
+                            text = "Gemma 3 1B IT",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.SemiBold,
+                            color = SlateBright
+                        )
+                        Text(
+                            text = "Offline Generative Model",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = SlateMuted
+                        )
+                    }
+                }
+
+                // Status Badge
+                val (badgeColor, textColor) = when (status) {
+                    EmbeddedModelStatus.READY -> Pair(CyanLuminous.copy(alpha = 0.2f), CyanBright)
+                    EmbeddedModelStatus.DOWNLOADING, EmbeddedModelStatus.VERIFYING, EmbeddedModelStatus.INITIALIZING -> Pair(CyanLuminous.copy(alpha = 0.15f), CyanLuminous)
+                    EmbeddedModelStatus.NOT_INSTALLED, EmbeddedModelStatus.CANCELLED -> Pair(CoreCharcoalElevated, SlateMuted)
+                    EmbeddedModelStatus.INSUFFICIENT_STORAGE, EmbeddedModelStatus.ERROR, EmbeddedModelStatus.CORRUPTED, EmbeddedModelStatus.INCOMPATIBLE_DEVICE -> Pair(MaterialTheme.colorScheme.error.copy(alpha = 0.2f), MaterialTheme.colorScheme.error)
+                    else -> Pair(CoreCharcoalElevated, SlateLight)
+                }
+
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(badgeColor)
+                        .padding(horizontal = 8.dp, vertical = 4.dp)
+                ) {
+                    Text(
+                        text = status.label.uppercase(),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = textColor,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
+
+            Text(
+                text = "This model runs locally on your device after installation. No internet connection is required for inference.",
+                style = MaterialTheme.typography.bodySmall,
+                color = SlateLight
+            )
+
+            DiagnosticRow(label = "Model Size", value = "approx. ${modelDiag.approximateSizeFormatted}")
+            DiagnosticRow(label = "Inference Backend", value = "LiteRT-LM (${modelDiag.activeBackend})")
+
+            if (status == EmbeddedModelStatus.DOWNLOADING) {
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    val downloadedMb = modelDiag.downloadedBytes / (1024 * 1024)
+                    val totalMb = if (modelDiag.totalBytesToDownload > 0) modelDiag.totalBytesToDownload / (1024 * 1024) else 584L
+                    val progressPercent = (modelDiag.downloadProgress * 100).toInt()
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(
+                            text = "Downloading model weights...",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = CyanLuminous
+                        )
+                        Text(
+                            text = "$downloadedMb / $totalMb MB ($progressPercent%)",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = SlateBright
+                        )
+                    }
+
+                    LinearProgressIndicator(
+                        progress = { modelDiag.downloadProgress },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(6.dp)
+                            .clip(RoundedCornerShape(3.dp)),
+                        color = CyanLuminous,
+                        trackColor = CoreCharcoalElevated
+                    )
+                }
+            }
+
+            if (status == EmbeddedModelStatus.INSUFFICIENT_STORAGE) {
+                Text(
+                    text = "Not enough storage is available to install this local AI model.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                    fontWeight = FontWeight.Medium
+                )
+            } else if (modelDiag.lastError != null && status in listOf(EmbeddedModelStatus.ERROR, EmbeddedModelStatus.CORRUPTED)) {
+                Text(
+                    text = "Notice: ${modelDiag.lastError}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error
+                )
+            }
+
+            // Action Buttons
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                when (status) {
+                    EmbeddedModelStatus.NOT_INSTALLED, EmbeddedModelStatus.CANCELLED -> {
+                        Button(
+                            onClick = onInstall,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("install_embedded_model_button"),
+                            shape = RoundedCornerShape(20.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = CyanLuminous,
+                                contentColor = CoreBlack
+                            )
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Download,
+                                contentDescription = null,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.size(8.dp))
+                            Text(
+                                text = "Install Local AI (584 MB)",
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+                    }
+
+                    EmbeddedModelStatus.DOWNLOADING, EmbeddedModelStatus.CHECKING, EmbeddedModelStatus.VERIFYING -> {
+                        OutlinedButton(
+                            onClick = onCancel,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("cancel_embedded_model_download_button"),
+                            shape = RoundedCornerShape(20.dp),
+                            colors = ButtonDefaults.outlinedButtonColors(
+                                contentColor = MaterialTheme.colorScheme.error
+                            ),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.5f))
+                        ) {
+                            Text(
+                                text = "Cancel Download",
+                                style = MaterialTheme.typography.labelMedium
+                            )
+                        }
+                    }
+
+                    EmbeddedModelStatus.READY -> {
+                        OutlinedButton(
+                            onClick = onDelete,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("delete_embedded_model_button"),
+                            shape = RoundedCornerShape(20.dp),
+                            colors = ButtonDefaults.outlinedButtonColors(
+                                contentColor = MaterialTheme.colorScheme.error
+                            ),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.4f))
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Delete,
+                                contentDescription = null,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.size(8.dp))
+                            Text(
+                                text = "Remove Model File",
+                                style = MaterialTheme.typography.labelMedium
+                            )
+                        }
+                    }
+
+                    EmbeddedModelStatus.ERROR, EmbeddedModelStatus.INSUFFICIENT_STORAGE, EmbeddedModelStatus.CORRUPTED -> {
+                        Button(
+                            onClick = onInstall,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("retry_embedded_model_button"),
+                            shape = RoundedCornerShape(20.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = CyanLuminous,
+                                contentColor = CoreBlack
+                            )
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Refresh,
+                                contentDescription = null,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.size(8.dp))
+                            Text(
+                                text = "Retry Installation",
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+                    }
+
+                    else -> {}
+                }
             }
         }
     }
