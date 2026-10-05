@@ -373,21 +373,21 @@ class MainViewModel @JvmOverloads constructor(
     }
 
     /**
-     * Installs the embedded local generative language model (Gemma 3 1B IT).
+     * Imports a local .litertlm model file into private storage.
      */
-    fun installEmbeddedModel() {
+    fun importEmbeddedModel(uri: android.net.Uri) {
         viewModelScope.launch {
-            embeddedModelManager.install()
+            embeddedModelManager.importModel(uri)
             aiModelRouter.refreshCapabilities()
         }
     }
 
     /**
-     * Cancels an ongoing embedded model download.
+     * Cancels an ongoing embedded model import/download.
      */
     fun cancelEmbeddedModelDownload() {
         viewModelScope.launch {
-            embeddedModelManager.cancelDownload()
+            embeddedModelManager.cancelImport()
         }
     }
 

@@ -1,6 +1,9 @@
 package com.example.ui.screens
 
+import android.net.Uri
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
@@ -28,6 +31,7 @@ import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.CloudQueue
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.Hearing
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Psychology
@@ -81,7 +85,7 @@ fun SettingsScreen(
     aiDiagnostics: AIDiagnostics = AIDiagnostics(),
     onUpdateSettings: (SummerSettings) -> Unit,
     onRefreshAIDiagnostics: () -> Unit = {},
-    onInstallEmbeddedModel: () -> Unit = {},
+    onImportEmbeddedModel: (Uri) -> Unit = {},
     onCancelEmbeddedModelDownload: () -> Unit = {},
     onDeleteEmbeddedModel: () -> Unit = {},
     onClearMemories: () -> Unit = {},
@@ -167,10 +171,10 @@ fun SettingsScreen(
             onRefresh = onRefreshAIDiagnostics
         )
 
-        // Phase 0I: Embedded Local Model Management
+        // Phase 0I-R1: Embedded Local Model Management via Storage Access Framework
         EmbeddedModelManagementCard(
             diagnostics = aiDiagnostics,
-            onInstall = onInstallEmbeddedModel,
+            onImport = onImportEmbeddedModel,
             onCancel = onCancelEmbeddedModelDownload,
             onDelete = onDeleteEmbeddedModel
         )
@@ -496,12 +500,20 @@ private fun AIDiagnosticsCard(
 @Composable
 private fun EmbeddedModelManagementCard(
     diagnostics: AIDiagnostics,
-    onInstall: () -> Unit,
+    onImport: (Uri) -> Unit,
     onCancel: () -> Unit,
     onDelete: () -> Unit
 ) {
     val modelDiag = diagnostics.embeddedModelDiagnostics
     val status = diagnostics.embeddedModelStatus
+
+    val filePickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri: Uri? ->
+        if (uri != null) {
+            onImport(uri)
+        }
+    }
 
     Card(
         modifier = Modifier
@@ -548,9 +560,9 @@ private fun EmbeddedModelManagementCard(
                             color = SlateBright
                         )
                         Text(
-                            text = "Offline Generative Model",
+                            text = if (status == EmbeddedModelStatus.READY) "Installed locally" else "Offline Generative Model",
                             style = MaterialTheme.typography.bodySmall,
-                            color = SlateMuted
+                            color = if (status == EmbeddedModelStatus.READY) CyanBright else SlateMuted
                         )
                     }
                 }
@@ -558,10 +570,16 @@ private fun EmbeddedModelManagementCard(
                 // Status Badge
                 val (badgeColor, textColor) = when (status) {
                     EmbeddedModelStatus.READY -> Pair(CyanLuminous.copy(alpha = 0.2f), CyanBright)
-                    EmbeddedModelStatus.DOWNLOADING, EmbeddedModelStatus.VERIFYING, EmbeddedModelStatus.INITIALIZING -> Pair(CyanLuminous.copy(alpha = 0.15f), CyanLuminous)
+                    EmbeddedModelStatus.DOWNLOADING, EmbeddedModelStatus.VERIFYING, EmbeddedModelStatus.INITIALIZING, EmbeddedModelStatus.CHECKING -> Pair(CyanLuminous.copy(alpha = 0.15f), CyanLuminous)
                     EmbeddedModelStatus.NOT_INSTALLED, EmbeddedModelStatus.CANCELLED -> Pair(CoreCharcoalElevated, SlateMuted)
                     EmbeddedModelStatus.INSUFFICIENT_STORAGE, EmbeddedModelStatus.ERROR, EmbeddedModelStatus.CORRUPTED, EmbeddedModelStatus.INCOMPATIBLE_DEVICE -> Pair(MaterialTheme.colorScheme.error.copy(alpha = 0.2f), MaterialTheme.colorScheme.error)
                     else -> Pair(CoreCharcoalElevated, SlateLight)
+                }
+
+                val badgeText = when (status) {
+                    EmbeddedModelStatus.DOWNLOADING, EmbeddedModelStatus.CHECKING, EmbeddedModelStatus.VERIFYING -> "IMPORTING"
+                    EmbeddedModelStatus.CORRUPTED -> "MODEL INVALID"
+                    else -> status.label.uppercase()
                 }
 
                 Box(
@@ -571,7 +589,7 @@ private fun EmbeddedModelManagementCard(
                         .padding(horizontal = 8.dp, vertical = 4.dp)
                 ) {
                     Text(
-                        text = status.label.uppercase(),
+                        text = badgeText,
                         style = MaterialTheme.typography.labelSmall,
                         color = textColor,
                         fontWeight = FontWeight.Bold
@@ -580,15 +598,19 @@ private fun EmbeddedModelManagementCard(
             }
 
             Text(
-                text = "This model runs locally on your device after installation. No internet connection is required for inference.",
+                text = if (status == EmbeddedModelStatus.READY) {
+                    "This model runs locally on your device. No internet connection is required for inference."
+                } else {
+                    "Select a compatible .litertlm model stored on this device."
+                },
                 style = MaterialTheme.typography.bodySmall,
                 color = SlateLight
             )
 
-            DiagnosticRow(label = "Model Size", value = "approx. ${modelDiag.approximateSizeFormatted}")
+            DiagnosticRow(label = "Target Artifact", value = "Gemma 3 1B IT (.litertlm)")
             DiagnosticRow(label = "Inference Backend", value = "LiteRT-LM (${modelDiag.activeBackend})")
 
-            if (status == EmbeddedModelStatus.DOWNLOADING) {
+            if (status == EmbeddedModelStatus.DOWNLOADING || status == EmbeddedModelStatus.VERIFYING || status == EmbeddedModelStatus.CHECKING) {
                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     val downloadedMb = modelDiag.downloadedBytes / (1024 * 1024)
                     val totalMb = if (modelDiag.totalBytesToDownload > 0) modelDiag.totalBytesToDownload / (1024 * 1024) else 584L
@@ -599,19 +621,19 @@ private fun EmbeddedModelManagementCard(
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
                         Text(
-                            text = "Downloading model weights...",
+                            text = "Importing model file...",
                             style = MaterialTheme.typography.bodySmall,
                             color = CyanLuminous
                         )
                         Text(
-                            text = "$downloadedMb / $totalMb MB ($progressPercent%)",
+                            text = if (totalMb > 0) "$downloadedMb / $totalMb MB ($progressPercent%)" else "$downloadedMb MB",
                             style = MaterialTheme.typography.bodySmall,
                             color = SlateBright
                         )
                     }
 
                     LinearProgressIndicator(
-                        progress = { modelDiag.downloadProgress },
+                        progress = { if (modelDiag.downloadProgress > 0f) modelDiag.downloadProgress else 0.5f },
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(6.dp)
@@ -629,9 +651,9 @@ private fun EmbeddedModelManagementCard(
                     color = MaterialTheme.colorScheme.error,
                     fontWeight = FontWeight.Medium
                 )
-            } else if (modelDiag.lastError != null && status in listOf(EmbeddedModelStatus.ERROR, EmbeddedModelStatus.CORRUPTED)) {
+            } else if (status in listOf(EmbeddedModelStatus.ERROR, EmbeddedModelStatus.CORRUPTED)) {
                 Text(
-                    text = "Notice: ${modelDiag.lastError}",
+                    text = modelDiag.lastError ?: "The selected file is not a valid LiteRT-LM model.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.error
                 )
@@ -647,9 +669,10 @@ private fun EmbeddedModelManagementCard(
                 when (status) {
                     EmbeddedModelStatus.NOT_INSTALLED, EmbeddedModelStatus.CANCELLED -> {
                         Button(
-                            onClick = onInstall,
+                            onClick = { filePickerLauncher.launch(arrayOf("*/*")) },
                             modifier = Modifier
                                 .fillMaxWidth()
+                                .testTag("import_embedded_model_button")
                                 .testTag("install_embedded_model_button"),
                             shape = RoundedCornerShape(20.dp),
                             colors = ButtonDefaults.buttonColors(
@@ -658,13 +681,13 @@ private fun EmbeddedModelManagementCard(
                             )
                         ) {
                             Icon(
-                                imageVector = Icons.Default.Download,
+                                imageVector = Icons.Default.FolderOpen,
                                 contentDescription = null,
                                 modifier = Modifier.size(16.dp)
                             )
                             Spacer(modifier = Modifier.size(8.dp))
                             Text(
-                                text = "Install Local AI (584 MB)",
+                                text = "IMPORT LOCAL MODEL",
                                 style = MaterialTheme.typography.labelMedium,
                                 fontWeight = FontWeight.SemiBold
                             )
@@ -684,7 +707,7 @@ private fun EmbeddedModelManagementCard(
                             border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.5f))
                         ) {
                             Text(
-                                text = "Cancel Download",
+                                text = "Cancel Import",
                                 style = MaterialTheme.typography.labelMedium
                             )
                         }
@@ -717,10 +740,11 @@ private fun EmbeddedModelManagementCard(
 
                     EmbeddedModelStatus.ERROR, EmbeddedModelStatus.INSUFFICIENT_STORAGE, EmbeddedModelStatus.CORRUPTED -> {
                         Button(
-                            onClick = onInstall,
+                            onClick = { filePickerLauncher.launch(arrayOf("*/*")) },
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .testTag("retry_embedded_model_button"),
+                                .testTag("retry_embedded_model_button")
+                                .testTag("import_embedded_model_button"),
                             shape = RoundedCornerShape(20.dp),
                             colors = ButtonDefaults.buttonColors(
                                 containerColor = CyanLuminous,
@@ -734,7 +758,7 @@ private fun EmbeddedModelManagementCard(
                             )
                             Spacer(modifier = Modifier.size(8.dp))
                             Text(
-                                text = "Retry Installation",
+                                text = "Retry Import",
                                 style = MaterialTheme.typography.labelMedium,
                                 fontWeight = FontWeight.SemiBold
                             )

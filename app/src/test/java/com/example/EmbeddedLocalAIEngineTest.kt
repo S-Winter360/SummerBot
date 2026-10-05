@@ -90,7 +90,15 @@ class EmbeddedLocalAIEngineTest {
 
         override suspend fun inspect(): EmbeddedModelStatus = _status.value
 
-        override suspend fun install(): Result<Unit> {
+        override suspend fun importModel(uri: android.net.Uri): Result<Unit> {
+            return importModelStream(inputStreamProvider = { null })
+        }
+
+        override suspend fun importModelStream(
+            inputStreamProvider: () -> java.io.InputStream?,
+            fileNameHint: String?,
+            totalSizeBytes: Long?
+        ): Result<Unit> {
             _status.value = EmbeddedModelStatus.DOWNLOADING
             _downloadProgress.value = 0.5f
             _status.value = EmbeddedModelStatus.VERIFYING
@@ -105,10 +113,18 @@ class EmbeddedLocalAIEngineTest {
             return Result.success(Unit)
         }
 
-        override suspend fun cancelDownload() {
+        override suspend fun cancelImport() {
             _status.value = EmbeddedModelStatus.CANCELLED
             _downloadProgress.value = 0f
             _diagnostics.value = _diagnostics.value.copy(status = EmbeddedModelStatus.CANCELLED)
+        }
+
+        override suspend fun install(): Result<Unit> {
+            return importModelStream(inputStreamProvider = { null })
+        }
+
+        override suspend fun cancelDownload() {
+            cancelImport()
         }
 
         override suspend fun verify(): Result<Unit> = Result.success(Unit)

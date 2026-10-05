@@ -2,7 +2,9 @@ package com.example.ai.localmodel
 
 import android.app.ActivityManager
 import android.content.Context
+import android.net.Uri
 import android.os.Build
+import android.provider.OpenableColumns
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -14,6 +16,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import java.io.File
+import java.io.InputStream
 import java.util.concurrent.atomic.AtomicBoolean
 
 interface EmbeddedModelManager {
@@ -22,8 +25,15 @@ interface EmbeddedModelManager {
     val downloadProgress: StateFlow<Float>
 
     suspend fun inspect(): EmbeddedModelStatus
-    suspend fun install(): Result<Unit>
-    suspend fun cancelDownload()
+    suspend fun importModel(uri: Uri): Result<Unit>
+    suspend fun importModelStream(
+        inputStreamProvider: () -> InputStream?,
+        fileNameHint: String? = null,
+        totalSizeBytes: Long? = null
+    ): Result<Unit>
+    suspend fun cancelImport()
+    suspend fun cancelDownload() = cancelImport()
+    suspend fun install(): Result<Unit> = Result.failure(UnsupportedOperationException("Direct HTTP download is deprecated. Use importModel() to import a local .litertlm file."))
     suspend fun verify(): Result<Unit>
     suspend fun deleteInstalledModel(): Result<Unit>
     fun getInstalledModelPath(): String?
@@ -40,6 +50,7 @@ class DefaultEmbeddedModelManager(
     companion object {
         private const val TAG = "EmbeddedModelManager"
         private const val MIN_REQUIRED_RAM_BYTES: Long = 2L * 1024L * 1024L * 1024L // 2GB minimum RAM baseline
+        const val EXPECTED_EXTENSION = ".litertlm"
     }
 
     private val _status = MutableStateFlow(EmbeddedModelStatus.NOT_INSTALLED)
@@ -58,8 +69,8 @@ class DefaultEmbeddedModelManager(
     private val _downloadProgress = MutableStateFlow(0f)
     override val downloadProgress: StateFlow<Float> = _downloadProgress.asStateFlow()
 
-    private val installMutex = Mutex()
-    private val isDownloadCancelled = AtomicBoolean(false)
+    private val importMutex = Mutex()
+    private val isImportCancelled = AtomicBoolean(false)
 
     init {
         scope.launch {
@@ -73,7 +84,7 @@ class DefaultEmbeddedModelManager(
 
     override fun getInstalledModelPath(): String? {
         val file = repository.getModelFile(metadata)
-        return if (file.exists() && file.isFile && file.length() > 0) {
+        return if (file.exists() && file.isFile && file.length() >= EmbeddedModelRepository.MIN_VALID_MODEL_BYTES) {
             file.absolutePath
         } else {
             null
@@ -102,11 +113,34 @@ class DefaultEmbeddedModelManager(
         return newStatus
     }
 
-    override suspend fun install(): Result<Unit> = installMutex.withLock {
-        isDownloadCancelled.set(false)
+    override suspend fun importModel(uri: Uri): Result<Unit> {
+        val fileName = getFileNameFromUri(uri)
+        val fileSize = getFileSizeFromUri(uri)
+        return importModelStream(
+            inputStreamProvider = { context.contentResolver.openInputStream(uri) },
+            fileNameHint = fileName,
+            totalSizeBytes = fileSize
+        )
+    }
+
+    override suspend fun importModelStream(
+        inputStreamProvider: () -> InputStream?,
+        fileNameHint: String?,
+        totalSizeBytes: Long?
+    ): Result<Unit> = importMutex.withLock {
+        isImportCancelled.set(false)
         _status.value = EmbeddedModelStatus.CHECKING
 
-        // 1. Compatibility check
+        // 1. File extension validation
+        if (fileNameHint != null && !fileNameHint.endsWith(EXPECTED_EXTENSION, ignoreCase = true)) {
+            val status = EmbeddedModelStatus.CORRUPTED
+            val errorMsg = "The selected file is not a valid LiteRT-LM model."
+            _status.value = status
+            updateDiagnostics(status, error = errorMsg)
+            return Result.failure(IllegalArgumentException("Invalid model format. Only .litertlm files are supported."))
+        }
+
+        // 2. Compatibility check
         val (compatible, reason) = evaluateDeviceCompatibility()
         if (!compatible) {
             val status = EmbeddedModelStatus.INCOMPATIBLE_DEVICE
@@ -115,8 +149,9 @@ class DefaultEmbeddedModelManager(
             return Result.failure(IllegalStateException(reason ?: "Device is incompatible"))
         }
 
-        // 2. Storage check
-        if (!repository.hasSufficientStorage(metadata.sizeBytes)) {
+        // 3. Storage check
+        val requiredBytes = totalSizeBytes ?: metadata.sizeBytes
+        if (requiredBytes > 0 && !repository.hasSufficientStorage(requiredBytes)) {
             val status = EmbeddedModelStatus.INSUFFICIENT_STORAGE
             val msg = "Not enough storage is available to install this local AI model."
             _status.value = status
@@ -124,28 +159,29 @@ class DefaultEmbeddedModelManager(
             return Result.failure(IllegalStateException(msg))
         }
 
-        // 3. Download phase
+        // 4. Import / Streaming phase
         _status.value = EmbeddedModelStatus.DOWNLOADING
         _downloadProgress.value = 0f
         updateDiagnostics(EmbeddedModelStatus.DOWNLOADING)
 
-        val downloadResult = repository.downloadModel(
+        val importResult = repository.importModelFromStream(
             metadata = metadata,
-            downloadUrl = metadata.id.remoteDownloadUrl,
-            onProgress = { downloaded, total, progress ->
+            inputStreamProvider = inputStreamProvider,
+            totalSizeBytes = totalSizeBytes,
+            onProgress = { imported, total, progress ->
                 _downloadProgress.value = progress
                 _diagnostics.update { current ->
                     current.copy(
                         downloadProgress = progress,
-                        downloadedBytes = downloaded,
+                        downloadedBytes = imported,
                         totalBytesToDownload = total
                     )
                 }
             },
-            isCancelled = { isDownloadCancelled.get() }
+            isCancelled = { isImportCancelled.get() }
         )
 
-        return downloadResult.fold(
+        return importResult.fold(
             onSuccess = { file ->
                 _status.value = EmbeddedModelStatus.VERIFYING
                 updateDiagnostics(EmbeddedModelStatus.VERIFYING)
@@ -158,27 +194,29 @@ class DefaultEmbeddedModelManager(
                     Result.success(Unit)
                 } else {
                     _status.value = EmbeddedModelStatus.CORRUPTED
-                    updateDiagnostics(EmbeddedModelStatus.CORRUPTED, error = "Integrity check failed")
-                    Result.failure(IllegalStateException("Model integrity check failed after download"))
+                    val errorMsg = "The selected file is not a valid LiteRT-LM model."
+                    updateDiagnostics(EmbeddedModelStatus.CORRUPTED, error = errorMsg)
+                    Result.failure(IllegalStateException(errorMsg))
                 }
             },
             onFailure = { error ->
-                val finalStatus = if (isDownloadCancelled.get()) {
+                val finalStatus = if (isImportCancelled.get()) {
                     EmbeddedModelStatus.CANCELLED
                 } else {
-                    EmbeddedModelStatus.ERROR
+                    EmbeddedModelStatus.CORRUPTED
                 }
                 _status.value = finalStatus
                 _downloadProgress.value = 0f
-                updateDiagnostics(finalStatus, error = error.message)
+                val userVisibleError = if (isImportCancelled.get()) "Import cancelled." else "The selected file is not a valid LiteRT-LM model."
+                updateDiagnostics(finalStatus, error = userVisibleError)
                 Result.failure(error)
             }
         )
     }
 
-    override suspend fun cancelDownload() {
-        isDownloadCancelled.set(true)
-        if (_status.value == EmbeddedModelStatus.DOWNLOADING) {
+    override suspend fun cancelImport() {
+        isImportCancelled.set(true)
+        if (_status.value == EmbeddedModelStatus.DOWNLOADING || _status.value == EmbeddedModelStatus.CHECKING) {
             _status.value = EmbeddedModelStatus.CANCELLED
             _downloadProgress.value = 0f
             updateDiagnostics(EmbeddedModelStatus.CANCELLED)
@@ -187,18 +225,51 @@ class DefaultEmbeddedModelManager(
 
     override suspend fun verify(): Result<Unit> {
         val file = repository.getModelFile(metadata)
-        if (!file.exists() || file.length() == 0L) {
-            return Result.failure(IllegalStateException("Model file is missing or empty."))
+        if (!file.exists() || file.length() < EmbeddedModelRepository.MIN_VALID_MODEL_BYTES) {
+            return Result.failure(IllegalStateException("The selected file is not a valid LiteRT-LM model."))
         }
         return Result.success(Unit)
     }
 
-    override suspend fun deleteInstalledModel(): Result<Unit> = installMutex.withLock {
+    override suspend fun deleteInstalledModel(): Result<Unit> = importMutex.withLock {
         val result = repository.deleteModel(metadata)
         _status.value = EmbeddedModelStatus.NOT_INSTALLED
         _downloadProgress.value = 0f
         updateDiagnostics(EmbeddedModelStatus.NOT_INSTALLED)
         result
+    }
+
+    private fun getFileNameFromUri(uri: Uri): String? {
+        if (uri.scheme == "content") {
+            try {
+                context.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
+                    if (cursor.moveToFirst()) {
+                        val nameIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                        if (nameIndex != -1) {
+                            return cursor.getString(nameIndex)
+                        }
+                    }
+                }
+            } catch (_: Throwable) {}
+        }
+        return uri.lastPathSegment
+    }
+
+    private fun getFileSizeFromUri(uri: Uri): Long? {
+        if (uri.scheme == "content") {
+            try {
+                context.contentResolver.query(uri, arrayOf(OpenableColumns.SIZE), null, null, null)?.use { cursor ->
+                    if (cursor.moveToFirst()) {
+                        val sizeIndex = cursor.getColumnIndex(OpenableColumns.SIZE)
+                        if (sizeIndex != -1) {
+                            val size = cursor.getLong(sizeIndex)
+                            if (size > 0) return size
+                        }
+                    }
+                }
+            } catch (_: Throwable) {}
+        }
+        return null
     }
 
     private fun evaluateDeviceCompatibility(): Pair<Boolean, String?> {

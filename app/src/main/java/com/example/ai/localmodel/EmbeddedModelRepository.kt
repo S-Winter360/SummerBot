@@ -1,21 +1,19 @@
 package com.example.ai.localmodel
 
 import android.content.Context
-import android.os.Environment
 import android.os.StatFs
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.FileOutputStream
 import java.io.InputStream
-import java.net.HttpURLConnection
-import java.net.URL
 import java.security.MessageDigest
 
 /**
  * Storage and file I/O repository for embedded local AI models.
  * Strictly maintains model artifacts in application-private storage under "embedded_models/".
- * Streams downloads to temporary files before atomically moving them to prevent corrupted/incomplete states.
+ * Streams imported model files to temporary ".partial" files before atomically moving them
+ * to prevent corrupted or partial installations from breaking working models.
  */
 class EmbeddedModelRepository(
     private val context: Context,
@@ -25,6 +23,7 @@ class EmbeddedModelRepository(
         private const val TAG = "EmbeddedModelRepo"
         // 200 MB safety headroom beyond model size
         const val STORAGE_SAFETY_MARGIN_BYTES: Long = 200L * 1024L * 1024L
+        const val MIN_VALID_MODEL_BYTES: Long = 16L
     }
 
     private val modelsDir: File by lazy {
@@ -47,7 +46,7 @@ class EmbeddedModelRepository(
      */
     fun isModelInstalled(metadata: EmbeddedModelMetadata): Boolean {
         val file = getModelFile(metadata)
-        return file.exists() && file.isFile && file.length() > 0
+        return file.exists() && file.isFile && file.length() >= MIN_VALID_MODEL_BYTES
     }
 
     /**
@@ -72,7 +71,7 @@ class EmbeddedModelRepository(
     }
 
     /**
-     * Verifies whether there is sufficient storage to download and install the model,
+     * Verifies whether there is sufficient storage to import and store the model,
      * including safety margin.
      */
     fun hasSufficientStorage(requiredBytes: Long): Boolean {
@@ -81,128 +80,138 @@ class EmbeddedModelRepository(
     }
 
     /**
-     * Streams model bytes from a remote URL to a temporary file, reporting progress.
-     * Atomically moves to final filename only upon successful completion.
+     * Streams model bytes from a stream provider into a private temporary file (.partial).
+     * Validates size and integrity before atomically swapping with the target file.
+     * If replacement fails, the previously installed model is retained intact.
      */
-    suspend fun downloadModel(
+    suspend fun importModelFromStream(
         metadata: EmbeddedModelMetadata,
-        downloadUrl: String,
-        onProgress: (downloadedBytes: Long, totalBytes: Long, progressFraction: Float) -> Unit,
+        inputStreamProvider: () -> InputStream?,
+        totalSizeBytes: Long? = null,
+        onProgress: (importedBytes: Long, totalBytes: Long, progressFraction: Float) -> Unit,
         isCancelled: () -> Boolean
     ): Result<File> = withContext(Dispatchers.IO) {
         val targetFile = getModelFile(metadata)
-        val tempFile = File(modelsDir, "${metadata.filename}.tmp")
+        val partialFile = File(modelsDir, "${metadata.filename}.partial")
+        val backupFile = File(modelsDir, "${metadata.filename}.backup")
 
         try {
-            if (tempFile.exists()) {
-                tempFile.delete()
+            if (partialFile.exists()) {
+                partialFile.delete()
+            }
+            if (backupFile.exists()) {
+                backupFile.delete()
             }
 
-            if (!hasSufficientStorage(metadata.sizeBytes)) {
+            val expectedSize = totalSizeBytes ?: metadata.sizeBytes
+            if (expectedSize > 0 && !hasSufficientStorage(expectedSize)) {
                 return@withContext Result.failure(
                     IllegalStateException("Not enough storage is available to install this local AI model.")
                 )
             }
 
-            val url = URL(downloadUrl)
-            val connection = (url.openConnection() as HttpURLConnection).apply {
-                connectTimeout = 30_000
-                readTimeout = 60_000
-                instanceFollowRedirects = true
-                requestMethod = "GET"
-            }
+            val inputStream = inputStreamProvider() ?: return@withContext Result.failure(
+                IllegalArgumentException("Unable to open stream from selected model file.")
+            )
 
-            val responseCode = connection.responseCode
-            if (responseCode !in 200..299) {
-                return@withContext Result.failure(
-                    IllegalStateException("HTTP download failed with response code $responseCode")
-                )
-            }
+            var importedBytes = 0L
 
-            val totalBytes = if (connection.contentLengthLong > 0) connection.contentLengthLong else metadata.sizeBytes
-            var downloadedBytes = 0L
-
-            connection.inputStream.use { input: InputStream ->
-                FileOutputStream(tempFile).use { output: FileOutputStream ->
+            inputStream.use { input ->
+                FileOutputStream(partialFile).use { output ->
                     val buffer = ByteArray(64 * 1024) // 64 KB buffer
                     var bytesRead: Int
 
                     while (input.read(buffer).also { bytesRead = it } != -1) {
                         if (isCancelled()) {
                             output.flush()
-                            tempFile.delete()
+                            partialFile.delete()
                             return@withContext Result.failure(
-                                IllegalStateException("Download cancelled by user.")
+                                IllegalStateException("Import cancelled by user.")
                             )
                         }
 
                         output.write(buffer, 0, bytesRead)
-                        downloadedBytes += bytesRead
+                        importedBytes += bytesRead
 
-                        val progressFraction = if (totalBytes > 0) {
-                            (downloadedBytes.toFloat() / totalBytes.toFloat()).coerceIn(0f, 1f)
+                        val progressFraction = if (expectedSize > 0) {
+                            (importedBytes.toFloat() / expectedSize.toFloat()).coerceIn(0f, 1f)
                         } else {
                             0f
                         }
-                        onProgress(downloadedBytes, totalBytes, progressFraction)
+                        onProgress(importedBytes, expectedSize, progressFraction)
                     }
                     output.flush()
                 }
             }
 
             if (isCancelled()) {
-                tempFile.delete()
-                return@withContext Result.failure(IllegalStateException("Download cancelled by user."))
+                partialFile.delete()
+                return@withContext Result.failure(IllegalStateException("Import cancelled by user."))
             }
 
             // Verify size
-            if (tempFile.length() == 0L) {
-                tempFile.delete()
-                return@withContext Result.failure(IllegalStateException("Downloaded file is empty."))
+            if (partialFile.length() < MIN_VALID_MODEL_BYTES) {
+                partialFile.delete()
+                return@withContext Result.failure(
+                    IllegalStateException("The selected file is not a valid LiteRT-LM model.")
+                )
             }
 
-            // Checksum verification if available
+            // Checksum verification if metadata specifies one
             if (!metadata.sha256Checksum.isNullOrBlank()) {
-                val computedHash = computeSha256(tempFile)
+                val computedHash = computeSha256(partialFile)
                 if (!computedHash.equals(metadata.sha256Checksum, ignoreCase = true)) {
-                    tempFile.delete()
+                    partialFile.delete()
                     return@withContext Result.failure(
                         IllegalStateException("Model checksum mismatch. Installation aborted.")
                     )
                 }
             }
 
-            // Atomic rename / move to destination
+            // Safe Atomic Replacement
             if (targetFile.exists()) {
-                targetFile.delete()
+                targetFile.renameTo(backupFile)
             }
 
-            val success = tempFile.renameTo(targetFile)
-            if (!success) {
-                // Fallback copy & delete
-                tempFile.copyTo(targetFile, overwrite = true)
-                tempFile.delete()
+            val renameSuccess = partialFile.renameTo(targetFile)
+            if (renameSuccess) {
+                if (backupFile.exists()) {
+                    backupFile.delete()
+                }
+                Result.success(targetFile)
+            } else {
+                // Restore backup if rename failed
+                if (backupFile.exists()) {
+                    backupFile.renameTo(targetFile)
+                }
+                partialFile.delete()
+                Result.failure(IllegalStateException("Failed to move imported model into target destination."))
             }
-
-            Result.success(targetFile)
         } catch (t: Throwable) {
-            if (tempFile.exists()) {
-                tempFile.delete()
+            if (partialFile.exists()) {
+                partialFile.delete()
+            }
+            if (backupFile.exists() && !targetFile.exists()) {
+                backupFile.renameTo(targetFile)
             }
             Result.failure(t)
         }
     }
 
     /**
-     * Deletes the installed model file and any leftover temp files.
+     * Deletes the installed model file and any leftover temporary or backup files.
      */
     suspend fun deleteModel(metadata: EmbeddedModelMetadata): Result<Unit> = withContext(Dispatchers.IO) {
         try {
             val targetFile = getModelFile(metadata)
-            val tempFile = File(modelsDir, "${metadata.filename}.tmp")
+            val partialFile = File(modelsDir, "${metadata.filename}.partial")
+            val backupFile = File(modelsDir, "${metadata.filename}.backup")
 
-            if (tempFile.exists()) {
-                tempFile.delete()
+            if (partialFile.exists()) {
+                partialFile.delete()
+            }
+            if (backupFile.exists()) {
+                backupFile.delete()
             }
             if (targetFile.exists()) {
                 targetFile.delete()

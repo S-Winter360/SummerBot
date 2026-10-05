@@ -67,7 +67,7 @@ fun SummerApp(
                     aiDiagnostics = aiDiagnostics,
                     onUpdateSettings = { viewModel.updateSettings(it) },
                     onRefreshAIDiagnostics = { viewModel.refreshAICapabilities() },
-                    onInstallEmbeddedModel = { viewModel.installEmbeddedModel() },
+                    onImportEmbeddedModel = { viewModel.importEmbeddedModel(it) },
                     onCancelEmbeddedModelDownload = { viewModel.cancelEmbeddedModelDownload() },
                     onDeleteEmbeddedModel = { viewModel.deleteEmbeddedModel() },
                     onClearMemories = { viewModel.clearAllMemories() },
