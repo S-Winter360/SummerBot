@@ -9,13 +9,16 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -23,6 +26,10 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.example.core.state.SummerState
@@ -53,7 +60,9 @@ import kotlin.math.sin
 fun SummerCoreOrb(
     state: SummerState,
     modifier: Modifier = Modifier,
-    size: Dp = 240.dp
+    size: Dp = 240.dp,
+    onClick: (() -> Unit)? = null,
+    contentDescription: String? = null
 ) {
     val (primaryColor, ambientColor) = when (state) {
         is SummerState.Idle -> Pair(StateIdleCyan, CyanMuted)
@@ -159,9 +168,32 @@ fun SummerCoreOrb(
         label = "particle_drift"
     )
 
+    val accessibilityDescription = contentDescription ?: when (state) {
+        is SummerState.Idle -> "Summer is idle. Tap to speak."
+        is SummerState.Listening -> "Summer is listening. Tap to stop listening."
+        is SummerState.Thinking -> "Summer is thinking."
+        is SummerState.Speaking -> "Summer is speaking. Tap to interrupt."
+        is SummerState.Error -> "Summer encountered an error. Tap to speak."
+        else -> "Summer living core. Tap to speak."
+    }
+
     Box(
         modifier = modifier
             .size(size)
+            .clip(CircleShape)
+            .then(
+                if (onClick != null) {
+                    Modifier.clickable(
+                        role = Role.Button,
+                        onClickLabel = accessibilityDescription,
+                        onClick = onClick
+                    )
+                } else Modifier
+            )
+            .semantics {
+                this.contentDescription = accessibilityDescription
+                role = Role.Button
+            }
             .testTag("summer_core_orb"),
         contentAlignment = Alignment.Center
     ) {

@@ -41,6 +41,7 @@ fun SummerApp(
     val aiDiagnostics by viewModel.aiDiagnostics.collectAsStateWithLifecycle()
     val speechState by viewModel.speechRecognitionState.collectAsStateWithLifecycle()
     val partialTranscript by viewModel.partialSpeechTranscript.collectAsStateWithLifecycle()
+    val conversationMessages by viewModel.conversationMessages.collectAsStateWithLifecycle()
 
     Crossfade(targetState = currentScreen, label = "screen_crossfade") { screen ->
         when (screen) {
@@ -57,7 +58,9 @@ fun SummerApp(
                     onMicTrigger = { viewModel.triggerVoiceInteraction() },
                     onNavigateToSettings = { viewModel.navigateTo(CurrentScreen.SETTINGS) },
                     speechState = speechState,
-                    partialSpeechTranscript = partialTranscript
+                    partialSpeechTranscript = partialTranscript,
+                    conversationMessages = conversationMessages,
+                    onCoreOrbClick = { viewModel.onCoreOrbClick() }
                 )
             }
 

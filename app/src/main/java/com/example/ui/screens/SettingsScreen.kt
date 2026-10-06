@@ -1176,12 +1176,24 @@ private fun VoiceSettingsCard(
             }
 
             DiagnosticRow(
+                label = "Selected Profile",
+                value = "${diagnostics.voiceDiagnostics.selectedProfileName} (${diagnostics.voiceDiagnostics.selectedProfileIdString})"
+            )
+            DiagnosticRow(
                 label = "Active Provider",
                 value = diagnostics.voiceDiagnostics.activeProvider.displayName
             )
             DiagnosticRow(
-                label = "Resolved Voice",
+                label = "Resolved TTS Voice",
                 value = diagnostics.voiceDiagnostics.resolvedEngineVoice ?: "Default System Voice"
+            )
+            DiagnosticRow(
+                label = "Locale",
+                value = diagnostics.voiceDiagnostics.localeString
+            )
+            DiagnosticRow(
+                label = "Vocal Pitch",
+                value = String.format(Locale.US, "%.2fx", diagnostics.voiceDiagnostics.pitch)
             )
             DiagnosticRow(
                 label = "Offline Capable",

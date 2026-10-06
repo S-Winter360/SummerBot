@@ -1,6 +1,9 @@
 package com.example.ui
 
 import android.app.Application
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.actions.ActionAuditEntry
@@ -41,6 +44,9 @@ import com.example.network.AndroidNetworkInformationProvider
 import com.example.network.NetworkInformationProvider
 import com.example.network.NetworkState
 import com.example.security.DefaultActionAuthorizationPolicy
+import com.example.ui.models.ConversationMessage
+import com.example.ui.models.ConversationSource
+import com.example.ui.models.ConversationSpeaker
 import com.example.vision.AndroidVisionCapabilityDetector
 import com.example.vision.VisionEngine
 import com.example.vision.VisionEngineRouter
@@ -60,6 +66,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import java.io.Closeable
 
@@ -218,6 +225,18 @@ class MainViewModel @JvmOverloads constructor(
             initialValue = "Hello. I'm here whenever you'd like to talk."
         )
 
+    // Phase 0J-R2: In-Session Persistent Conversation Transcript
+    private val _conversationMessages = MutableStateFlow<List<ConversationMessage>>(
+        listOf(
+            ConversationMessage(
+                speaker = ConversationSpeaker.SUMMER,
+                text = "Hello. I'm here whenever you'd like to talk.",
+                source = ConversationSource.SYSTEM
+            )
+        )
+    )
+    val conversationMessages: StateFlow<List<ConversationMessage>> = _conversationMessages.asStateFlow()
+
     val voiceDiagnostics: StateFlow<VoiceDiagnostics> = voiceEngine.diagnostics
     val isSpeaking: StateFlow<Boolean> = voiceEngine.isSpeaking
 
@@ -262,9 +281,11 @@ class MainViewModel @JvmOverloads constructor(
                     VoiceProfileId.FEMALE
                 }
                 voiceEngine.selectVoiceProfile(profileId)
+                val baseProfile = com.example.voice.models.VoiceProfile.fromId(profileId)
+                val effectivePitch = if (s.speechPitch != 1.0f) s.speechPitch else baseProfile.pitch
                 voiceEngine.updateProfileSettings(
                     speechRate = s.speechSpeed,
-                    pitch = s.speechPitch,
+                    pitch = effectivePitch,
                     volume = s.speechVolume
                 )
             }
@@ -311,18 +332,61 @@ class MainViewModel @JvmOverloads constructor(
     }
 
     /**
-     * Submits user input to the cognitive orchestrator.
+     * Primary user interaction triggered by tapping the Living AI Core.
+     * Enforces the foreground, turn-based companion state machine:
+     * - IDLE / ERROR / OBSERVING -> start speech recognition
+     * - LISTENING -> cancel / stop speech recognition
+     * - SPEAKING -> interrupt and stop speech output
+     * - THINKING / EXECUTING -> no-op to prevent duplicate sessions
+     */
+    fun onCoreOrbClick() {
+        when (summerState.value) {
+            is SummerState.Idle, is SummerState.Error, is SummerState.Observing, is SummerState.Learning -> {
+                startListening()
+            }
+            is SummerState.Listening -> {
+                stopListening()
+            }
+            is SummerState.Speaking -> {
+                stopSpeech()
+            }
+            is SummerState.Thinking, is SummerState.Executing -> {
+                // Cognitive processing active; no-op to avoid unintended interference
+            }
+        }
+    }
+
+    /**
+     * Submits user input to the cognitive orchestrator and appends entries to the conversation transcript.
      * Enforces conversational interruptibility: active speech is immediately cancelled.
      */
     fun submitQuery(query: String, source: String = "ui.text_input") {
+        if (query.isBlank()) return
         viewModelScope.launch {
             // Conversational interruptibility
             voiceEngine.stop()
 
-            val interaction = orchestrator.handleUserInput(input = query, source = source)
+            val isVoice = source.contains("voice", ignoreCase = true)
+            val userMsg = ConversationMessage(
+                speaker = ConversationSpeaker.USER,
+                text = query.trim(),
+                source = if (isVoice) ConversationSource.VOICE else ConversationSource.TEXT
+            )
+            _conversationMessages.update { it + userMsg }
+
+            val interaction = orchestrator.handleUserInput(input = query.trim(), source = source)
             val responseText = interaction.response?.text
-            if (settings.value.voiceInteractionEnabled && !responseText.isNullOrBlank()) {
-                voiceEngine.speak(responseText)
+            if (!responseText.isNullOrBlank()) {
+                val assistantMsg = ConversationMessage(
+                    speaker = ConversationSpeaker.SUMMER,
+                    text = responseText.trim(),
+                    source = ConversationSource.SYSTEM
+                )
+                _conversationMessages.update { it + assistantMsg }
+
+                if (settings.value.voiceInteractionEnabled) {
+                    voiceEngine.speak(responseText)
+                }
             }
         }
     }

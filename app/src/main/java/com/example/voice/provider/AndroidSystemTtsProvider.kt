@@ -203,20 +203,46 @@ class AndroidSystemTtsProvider(
 
         val candidates = if (localeMatches.isNotEmpty()) localeMatches else availableVoices.toList()
 
-        // 2. Gender heuristics from voice name
-        val matchedVoice = candidates.firstOrNull { voice ->
-            val name = voice.name.lowercase(Locale.ROOT)
+        // 2. Check Voice.features if supported by TTS engine
+        val featureMatch = candidates.firstOrNull { voice ->
+            val features = voice.features ?: emptySet()
             if (isMale) {
-                (name.contains("male") && !name.contains("female")) ||
-                    name.contains("-g-") || name.contains("-d-") || name.contains("en-us-x-sfg") || name.contains("man")
+                features.any { it.equals("gender:male", ignoreCase = true) || it.equals("male", ignoreCase = true) }
             } else {
-                name.contains("female") || name.contains("-f-") || name.contains("-c-") ||
-                    name.contains("en-us-x-tpd") || name.contains("woman")
+                features.any { it.equals("gender:female", ignoreCase = true) || it.equals("female", ignoreCase = true) }
             }
         }
+        if (featureMatch != null) return featureMatch
 
-        // 3. Fallback: select any offline/normal latency voice from candidates, or first
-        return matchedVoice ?: candidates.firstOrNull { !it.isNetworkConnectionRequired } ?: candidates.firstOrNull()
+        // 3. Gender heuristics from voice name
+        // Google TTS:
+        // 'sfg' and 'iol' are female voices
+        // 'tpd' and 'iom' are male voices
+        val matchedVoice = candidates.firstOrNull { voice ->
+            val name = voice.name.lowercase(Locale.ROOT)
+            val isFemale = name.contains("female") || name.contains("woman") ||
+                name.contains("-f-") || name.contains("-c-") || name.contains("-a-") ||
+                name.contains("en-us-x-sfg") || name.contains("en-us-x-iol") || name.contains("#female")
+            val isMaleVoice = (name.contains("male") && !name.contains("female")) ||
+                name.contains(" man") || name.contains("-man") ||
+                name.contains("-g-") || name.contains("-d-") || name.contains("-b-") ||
+                name.contains("en-us-x-tpd") || name.contains("en-us-x-iom") || name.contains("#male")
+
+            if (isMale) isMaleVoice && !isFemale else isFemale && !isMaleVoice
+        }
+        if (matchedVoice != null) return matchedVoice
+
+        // 4. Fallback if male requested: prefer a different voice than default female voice if candidates > 1
+        if (isMale && candidates.size > 1) {
+            val nonFemale = candidates.firstOrNull { voice ->
+                val name = voice.name.lowercase(Locale.ROOT)
+                !name.contains("female") && !name.contains("sfg") && !name.contains("-a-")
+            }
+            if (nonFemale != null) return nonFemale
+        }
+
+        // 5. Fallback: select any offline/normal latency voice from candidates, or first
+        return candidates.firstOrNull { !it.isNetworkConnectionRequired } ?: candidates.firstOrNull()
     }
 
     override suspend fun stop() = withContext(Dispatchers.Main) {

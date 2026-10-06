@@ -58,11 +58,20 @@ class VoiceProfileResolver {
         val candidateList = if (localeMatched.isNotEmpty()) localeMatched else availableEngineVoiceIds
 
         // 3. Search for gender matching keywords
+        // Ensure Google TTS and Android standard naming conventions are mapped accurately:
+        // Female: 'sfg', 'iol', '-c-', '-f-', '-a-', 'female', 'woman'
+        // Male: 'tpd', 'iom', '-d-', '-g-', '-b-', 'male' (not 'female')
         val exactMatch = candidateList.firstOrNull { voiceName ->
             val lower = voiceName.lowercase(Locale.ROOT)
-            val isFemaleVoice = lower.contains("female") || lower.contains("woman") || lower.contains("-f-") || lower.contains("-c-")
-            val isMaleVoice = lower.replace("female", "").contains("male") || lower.contains("man") || lower.contains("-g-") || lower.contains("-d-")
-            if (isMale) isMaleVoice && !isFemaleVoice else isFemaleVoice
+            val isFemaleVoice = lower.contains("female") || lower.contains("woman") ||
+                lower.contains("-f-") || lower.contains("-c-") || lower.contains("-a-") ||
+                lower.contains("sfg") || lower.contains("iol") || lower.contains("#female")
+            val isMaleVoice = (lower.contains("male") && !lower.contains("female")) ||
+                lower.contains(" man") || lower.contains("-man") ||
+                lower.contains("-g-") || lower.contains("-d-") || lower.contains("-b-") ||
+                lower.contains("tpd") || lower.contains("iom") || lower.contains("#male")
+
+            if (isMale) isMaleVoice && !isFemaleVoice else isFemaleVoice && !isMaleVoice
         }
 
         if (exactMatch != null) {
@@ -75,8 +84,17 @@ class VoiceProfileResolver {
             )
         }
 
-        // 4. Graceful fallback to first candidate if target gender is not found
-        val fallbackMatch = candidateList.first()
+        // 4. Fallback: if MALE is requested and multiple voices exist, avoid female-sounding first voice if possible
+        val fallbackMatch = if (isMale && candidateList.size > 1) {
+            val candidateNonFemale = candidateList.firstOrNull { voiceName ->
+                val lower = voiceName.lowercase(Locale.ROOT)
+                !lower.contains("female") && !lower.contains("sfg") && !lower.contains("-a-") && !lower.contains("-c-")
+            }
+            candidateNonFemale ?: candidateList.first()
+        } else {
+            candidateList.first()
+        }
+
         return ResolvedVoice(
             profile = requestedProfile.copy(engineVoiceId = fallbackMatch, isAvailable = true),
             engineVoiceId = fallbackMatch,
