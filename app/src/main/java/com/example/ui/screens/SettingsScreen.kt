@@ -63,7 +63,9 @@ import androidx.compose.ui.unit.dp
 import com.example.ai.capability.AIDiagnostics
 import com.example.ai.capability.AIAvailabilityStatus
 import com.example.ai.capability.AIProviderType
+import com.example.ai.benchmark.LocalAIBenchmarkRunner
 import com.example.ai.localmodel.EmbeddedModelStatus
+import com.example.ui.components.LocalAIBenchmarkCard
 import com.example.memory.models.SummerSettings
 import com.example.ui.theme.CoreBlack
 import com.example.ui.theme.CoreCharcoalBorder
@@ -93,6 +95,10 @@ fun SettingsScreen(
     onSelectVoiceProfile: (VoiceProfileId) -> Unit = {},
     onSetSpeechSpeed: (Float) -> Unit = {},
     onPreviewVoice: () -> Unit = {},
+    benchmarkRunner: LocalAIBenchmarkRunner? = null,
+    onRunBenchmark: () -> Unit = {},
+    onCancelBenchmark: () -> Unit = {},
+    onResetBenchmark: () -> Unit = {},
     onNavigateBack: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -178,6 +184,16 @@ fun SettingsScreen(
             onCancel = onCancelEmbeddedModelDownload,
             onDelete = onDeleteEmbeddedModel
         )
+
+        // Phase 0J-R1: Embedded Local AI Benchmark & Inference Diagnostics
+        if (benchmarkRunner != null) {
+            LocalAIBenchmarkCard(
+                benchmarkRunner = benchmarkRunner,
+                onRunBenchmark = onRunBenchmark,
+                onCancelBenchmark = onCancelBenchmark,
+                onResetBenchmark = onResetBenchmark
+            )
+        }
 
         // Section: Voice & Audio Interaction
         Text(

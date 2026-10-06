@@ -75,6 +75,10 @@ fun SummerApp(
                     onSelectVoiceProfile = { viewModel.selectVoiceProfile(it) },
                     onSetSpeechSpeed = { viewModel.setSpeechSpeed(it) },
                     onPreviewVoice = { viewModel.previewVoice() },
+                    benchmarkRunner = viewModel.benchmarkRunner,
+                    onRunBenchmark = { viewModel.runEmbeddedAIBenchmark() },
+                    onCancelBenchmark = { viewModel.cancelEmbeddedAIBenchmark() },
+                    onResetBenchmark = { viewModel.resetEmbeddedAIBenchmark() },
                     onNavigateBack = { viewModel.navigateTo(CurrentScreen.MAIN) }
                 )
             }

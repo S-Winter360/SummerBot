@@ -17,7 +17,9 @@ import com.example.ai.capability.AndroidOnDeviceGenAIStatusProvider
 import com.example.ai.capability.DeviceAICapabilityDetector
 import com.example.ai.capability.OnDeviceGenAIProvider
 import com.example.ai.capability.OnDeviceGenAIStatusProvider
+import com.example.ai.benchmark.LocalAIBenchmarkRunner
 import com.example.ai.localmodel.DefaultEmbeddedModelManager
+import com.example.ai.localmodel.DirectInferenceEngine
 import com.example.ai.localmodel.EmbeddedLocalAIEngine
 import com.example.ai.localmodel.EmbeddedModelDiagnostics
 import com.example.ai.localmodel.EmbeddedModelManager
@@ -100,6 +102,17 @@ class MainViewModel @JvmOverloads constructor(
         context = application,
         modelManager = embeddedModelManager,
         personality = personality
+    )
+
+    // Phase 0J-R1: Dedicated Developer Local AI Benchmark Runner
+    val benchmarkRunner: LocalAIBenchmarkRunner = LocalAIBenchmarkRunner(
+        context = application,
+        directEngine = (embeddedEngine as? DirectInferenceEngine) ?: (EmbeddedLocalAIEngine(
+            context = application,
+            modelManager = embeddedModelManager,
+            personality = personality
+        )),
+        modelManager = embeddedModelManager
     )
 
     // Phase 0C-R1 / Phase 0I: Local AI Capability, Registry & 3-Tier Routing Layer
@@ -401,6 +414,19 @@ class MainViewModel @JvmOverloads constructor(
             embeddedModelManager.deleteInstalledModel()
             aiModelRouter.refreshCapabilities()
         }
+    }
+
+    // Phase 0J-R1: Benchmark triggers
+    fun runEmbeddedAIBenchmark() {
+        benchmarkRunner.runFullBenchmark(viewModelScope)
+    }
+
+    fun cancelEmbeddedAIBenchmark() {
+        benchmarkRunner.cancel()
+    }
+
+    fun resetEmbeddedAIBenchmark() {
+        benchmarkRunner.reset()
     }
 
     fun getPersonality(): SummerPersonality = personality

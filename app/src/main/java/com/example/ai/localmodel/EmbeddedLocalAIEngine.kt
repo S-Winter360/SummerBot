@@ -3,6 +3,8 @@ package com.example.ai.localmodel
 import android.content.Context
 import com.example.ai.AIEngine
 import com.example.ai.OfflineLocalAIEngine
+import com.example.ai.benchmark.ColdStartMetrics
+import com.example.ai.benchmark.InferencePerformanceMetrics
 import com.example.ai.capability.AIModelMetadata
 import com.example.ai.capability.AIProviderType
 import com.example.ai.capability.AIAvailabilityStatus
@@ -49,7 +51,7 @@ class EmbeddedLocalAIEngine(
     private val personality: SummerPersonality = SummerPersonality.DEFAULT,
     private val promptBuilder: SummerPromptBuilder = SummerPromptBuilder(personality = personality),
     private val responseParser: GeminiResponseParser = GeminiResponseParser()
-) : AIEngine, Closeable {
+) : AIEngine, DirectInferenceEngine, Closeable {
 
     companion object {
         private const val TAG = "EmbeddedLocalAIEngine"
@@ -59,6 +61,11 @@ class EmbeddedLocalAIEngine(
     private var litertEngine: Engine? = null
     private var activeConversation: Conversation? = null
     private var currentLoadedPath: String? = null
+    private var recordedInitializationTimeMs: Long? = null
+    private var recordedFirstInferenceTimeMs: Long? = null
+
+    override val isModelInstalledAndReady: Boolean
+        get() = modelManager.isModelReady()
 
     var metadata: AIModelMetadata = AIModelMetadata(
         provider = AIProviderType.EMBEDDED_LOCAL_MODEL,
@@ -115,8 +122,10 @@ class EmbeddedLocalAIEngine(
                     backend = Backend.CPU()
                 )
 
+                val initStart = android.os.SystemClock.elapsedRealtime()
                 val engine = Engine(config)
                 engine.initialize()
+                recordedInitializationTimeMs = android.os.SystemClock.elapsedRealtime()
 
                 litertEngine = engine
                 currentLoadedPath = modelPath
@@ -315,6 +324,162 @@ class EmbeddedLocalAIEngine(
                 } catch (_: Throwable) {}
             }
         }
+    }
+
+    /**
+     * Executes prompt inference directly on LiteRT-LM for developer benchmarking.
+     * Captures precise monotonic latency and reads conversation.getBenchmarkInfo() token metrics.
+     * Bypasses all orchestrators, decision engines, and deterministic fallbacks.
+     */
+    @OptIn(com.google.ai.edge.litertlm.ExperimentalApi::class)
+    override suspend fun executeDirectInference(
+        prompt: String,
+        systemInstruction: String?
+    ): DirectInferenceResult = withContext(Dispatchers.IO) {
+        if (!isModelInstalledAndReady) {
+            throw IllegalStateException("Embedded model is not installed or ready.")
+        }
+        val initialized = ensureInitialized()
+        if (!initialized) {
+            throw IllegalStateException("Failed to initialize LiteRT-LM engine.")
+        }
+
+        engineMutex.withLock {
+            val engine = litertEngine ?: throw IllegalStateException("LiteRT-LM engine is null despite initialization.")
+            val sb = StringBuilder()
+
+            val convConfig = if (systemInstruction.isNullOrBlank()) {
+                ConversationConfig()
+            } else {
+                ConversationConfig(systemInstruction = Contents.of(systemInstruction))
+            }
+
+            var conversation: Conversation? = null
+            val startTime = android.os.SystemClock.elapsedRealtime()
+            var timeToFirstTokenMs: Long? = null
+
+            try {
+                conversation = engine.createConversation(convConfig)
+                val flow = conversation.sendMessageAsync(prompt)
+                flow.collect { message ->
+                    kotlinx.coroutines.currentCoroutineContext().ensureActive()
+                    val contents = message.contents.contents
+                    for (c in contents) {
+                        if (c is Content.Text) {
+                            if (timeToFirstTokenMs == null && c.text.isNotEmpty()) {
+                                timeToFirstTokenMs = android.os.SystemClock.elapsedRealtime() - startTime
+                            }
+                            sb.append(c.text)
+                        }
+                    }
+                }
+                val totalInferenceTimeMs = android.os.SystemClock.elapsedRealtime() - startTime
+                val ttftMs = timeToFirstTokenMs ?: totalInferenceTimeMs
+
+                if (recordedFirstInferenceTimeMs == null) {
+                    recordedFirstInferenceTimeMs = totalInferenceTimeMs
+                }
+
+                var benchInfo: com.google.ai.edge.litertlm.BenchmarkInfo? = null
+                try {
+                    benchInfo = conversation.getBenchmarkInfo()
+                } catch (t: Throwable) {
+                    logWarn("BenchmarkInfo not accessible from conversation: ${t.message}")
+                }
+
+                val inputTokens = benchInfo?.lastPrefillTokenCount?.takeIf { it > 0 }
+                val outputTokens = benchInfo?.lastDecodeTokenCount?.takeIf { it > 0 }
+                val tps = benchInfo?.lastDecodeTokensPerSecond?.takeIf { it > 0.0 }
+                val prefillTps = benchInfo?.lastPrefillTokensPerSecond?.takeIf { it > 0.0 }
+                val initTimeSec = benchInfo?.initTimeInSecond?.takeIf { it > 0.0 }
+
+                DirectInferenceResult(
+                    outputText = sb.toString().trim(),
+                    timeToFirstResponseMs = ttftMs,
+                    totalInferenceTimeMs = totalInferenceTimeMs,
+                    inputTokens = inputTokens,
+                    outputTokens = outputTokens,
+                    tokensPerSecond = tps,
+                    prefillTokensPerSecond = prefillTps,
+                    initTimeInSecond = initTimeSec,
+                    rawBenchmarkInfoAvailable = benchInfo != null && (inputTokens != null || outputTokens != null || tps != null)
+                )
+            } finally {
+                try {
+                    conversation?.close()
+                } catch (_: Throwable) {}
+            }
+        }
+    }
+
+    /**
+     * Measures cold start metrics (engine initialization + first inference latency).
+     */
+    override suspend fun measureColdStart(samplePrompt: String): ColdStartMetrics = withContext(Dispatchers.IO) {
+        if (!isModelInstalledAndReady) {
+            throw IllegalStateException("Embedded model is not installed or ready.")
+        }
+
+        // If engine was already resident and we have recorded initialization metrics from this session:
+        if (litertEngine != null && recordedInitializationTimeMs != null && recordedFirstInferenceTimeMs != null) {
+            return@withContext ColdStartMetrics(
+                modelInitializationTimeMs = recordedInitializationTimeMs!!,
+                firstInferenceTimeMs = recordedFirstInferenceTimeMs!!,
+                totalColdStartTimeMs = recordedInitializationTimeMs!! + recordedFirstInferenceTimeMs!!,
+                wasAlreadyInitialized = true
+            )
+        }
+
+        engineMutex.withLock {
+            closeInternal()
+            val modelPath = modelManager.getInstalledModelPath()
+                ?: throw IllegalStateException("Model path not found.")
+
+            val initStart = android.os.SystemClock.elapsedRealtime()
+            val config = EngineConfig(
+                modelPath = modelPath,
+                backend = Backend.CPU()
+            )
+            val engine = Engine(config)
+            engine.initialize()
+            litertEngine = engine
+            currentLoadedPath = modelPath
+            val initDuration = android.os.SystemClock.elapsedRealtime() - initStart
+            recordedInitializationTimeMs = initDuration
+
+            val inferStart = android.os.SystemClock.elapsedRealtime()
+            var conversation: Conversation? = null
+            try {
+                val convConfig = ConversationConfig()
+                conversation = engine.createConversation(convConfig)
+                val flow = conversation.sendMessageAsync(samplePrompt)
+                flow.collect { }
+            } finally {
+                try {
+                    conversation?.close()
+                } catch (_: Throwable) {}
+            }
+            val firstInferDuration = android.os.SystemClock.elapsedRealtime() - inferStart
+            recordedFirstInferenceTimeMs = firstInferDuration
+
+            ColdStartMetrics(
+                modelInitializationTimeMs = initDuration,
+                firstInferenceTimeMs = firstInferDuration,
+                totalColdStartTimeMs = initDuration + firstInferDuration,
+                wasAlreadyInitialized = false
+            )
+        }
+    }
+
+    override fun getRuntimeModelDiagnostics(): Map<String, String> {
+        return mapOf(
+            "Model" to metadata.displayName,
+            "Runtime" to (metadata.runtime ?: "LiteRT-LM"),
+            "Quantization" to (metadata.quantization ?: "INT4"),
+            "Backend" to "CPU (Configured)",
+            "Engine Loaded" to (litertEngine != null).toString(),
+            "Model Path" to (currentLoadedPath ?: modelManager.getInstalledModelPath() ?: "Not installed")
+        )
     }
 
     private fun closeInternal() {
